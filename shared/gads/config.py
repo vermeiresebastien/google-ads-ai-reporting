@@ -1,0 +1,46 @@
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    database_url: str = "postgresql+psycopg://gads:gads@localhost:5432/gads"
+    redis_url: str = "redis://localhost:6379/0"
+    jwt_secret: str = "dev-only-change-me"
+    jwt_algorithm: str = "HS256"
+    access_token_minutes: int = 60 * 24 * 7
+    token_encryption_key: str = ""
+
+    google_ads_developer_token: str = ""
+    google_ads_client_id: str = ""
+    google_ads_client_secret: str = ""
+    google_ads_login_customer_id: str = ""
+    google_oauth_redirect_uri: str = "http://localhost:8000/api/google/oauth/callback"
+    google_ads_use_fake: bool = False
+    google_ads_api_version: str = "v25"
+
+    sync_initial_lookback_days: int = 90
+    ingest_max_days: int = 400
+    tool_max_days: int = 90
+    tool_max_rows: int = 100
+
+    frontend_url: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4.1-mini"
+    sentry_dsn: str = ""
+
+    gads_api_base_url: str = "http://localhost:8000"
+    gads_api_token: str = ""
+    enable_demo_seed: bool = False
+
+    def cors_origin_list(self) -> list[str]:
+        return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

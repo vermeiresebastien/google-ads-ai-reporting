@@ -64,6 +64,7 @@ class Workspace(Base):
 
     members: Mapped[list[WorkspaceMember]] = relationship(back_populates="workspace")
     connections: Mapped[list[GoogleConnection]] = relationship(back_populates="workspace")
+    platform_connections: Mapped[list[PlatformConnection]] = relationship(back_populates="workspace")
     accounts: Mapped[list[AdAccount]] = relationship(back_populates="workspace")
 
 
@@ -97,15 +98,39 @@ class GoogleConnection(Base):
     accounts: Mapped[list[AdAccount]] = relationship(back_populates="connection")
 
 
-class AdAccount(Base):
-    __tablename__ = "ad_accounts"
-    __table_args__ = (UniqueConstraint("workspace_id", "customer_id", name="uq_account_customer"),)
+class PlatformConnection(Base):
+    __tablename__ = "platform_connections"
+    __table_args__ = (UniqueConstraint("workspace_id", "platform", "external_user_id", name="uq_platform_user"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
-    connection_id: Mapped[str] = mapped_column(ForeignKey("google_connections.id", ondelete="CASCADE"), index=True)
-    customer_id: Mapped[str] = mapped_column(String(32))
-    manager_customer_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    platform: Mapped[str] = mapped_column(String(32))
+    external_user_id: Mapped[str] = mapped_column(String(255), default="")
+    external_email: Mapped[str] = mapped_column(String(320), default="")
+    refresh_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    access_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    access_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    workspace: Mapped[Workspace] = relationship(back_populates="platform_connections")
+    accounts: Mapped[list[AdAccount]] = relationship(back_populates="platform_connection")
+
+
+class AdAccount(Base):
+    __tablename__ = "ad_accounts"
+    __table_args__ = (UniqueConstraint("workspace_id", "platform", "customer_id", name="uq_account_platform_customer"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    connection_id: Mapped[str | None] = mapped_column(ForeignKey("google_connections.id", ondelete="CASCADE"), nullable=True, index=True)
+    platform_connection_id: Mapped[str | None] = mapped_column(
+        ForeignKey("platform_connections.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    platform: Mapped[str] = mapped_column(String(32), default="google")
+    customer_id: Mapped[str] = mapped_column(String(64))
+    manager_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     account_name: Mapped[str] = mapped_column(String(255), default="")
     currency_code: Mapped[str] = mapped_column(String(8), default="")
     timezone: Mapped[str] = mapped_column(String(64), default="")
@@ -115,7 +140,8 @@ class AdAccount(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     workspace: Mapped[Workspace] = relationship(back_populates="accounts")
-    connection: Mapped[GoogleConnection] = relationship(back_populates="accounts")
+    connection: Mapped[GoogleConnection | None] = relationship(back_populates="accounts")
+    platform_connection: Mapped[PlatformConnection | None] = relationship(back_populates="accounts")
     campaigns: Mapped[list[Campaign]] = relationship(back_populates="account", cascade="all, delete-orphan")
 
 

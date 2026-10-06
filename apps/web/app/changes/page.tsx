@@ -3,19 +3,29 @@
 import { useEffect, useState } from "react";
 import { Panel, Shell } from "@/components/shell";
 import { api } from "@/lib/api";
-import { useAccountId } from "@/lib/use-account";
+import { useSelectedAccount } from "@/lib/use-account";
 
 type Change = { id: string; event_timestamp: string; resource_type: string; change_type: string; field_changed: string; user_email: string; client_type: string };
 
 export default function ChangesPage() {
   const [rows, setRows] = useState<Change[]>([]);
 
-  const id = useAccountId();
+  const account = useSelectedAccount();
+  const id = account?.id ?? "";
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || account?.changes === false) return;
     api<{ rows: Change[] }>(`/api/changes?account_id=${id}&limit=100`).then((payload) => setRows(payload.rows)).catch(() => undefined);
-  }, [id]);
+  }, [id, account?.changes]);
+
+  if (account && !account.changes) {
+    return (
+      <Shell>
+        <h1 className="mb-4 text-2xl font-semibold">Recent changes</h1>
+        <p className="text-sm text-neutral-600">Change history is available for Google Ads. {account.platform_label} uses the dashboard, campaigns, reports, and trends.</p>
+      </Shell>
+    );
+  }
 
   return (
     <Shell>

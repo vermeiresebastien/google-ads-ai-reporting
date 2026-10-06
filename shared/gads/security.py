@@ -41,12 +41,13 @@ def decode_token(token: str) -> dict:
     return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
 
 
-def create_oauth_state(user_id: str, workspace_id: str) -> str:
+def create_oauth_state(user_id: str, workspace_id: str, platform: str = "google") -> str:
     settings = get_settings()
     payload = {
         "sub": user_id,
         "workspace_id": workspace_id,
-        "purpose": "google_oauth",
+        "platform": platform,
+        "purpose": "google_oauth" if platform == "google" else "platform_oauth",
         "exp": datetime.now(UTC) + timedelta(minutes=15),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
@@ -54,7 +55,7 @@ def create_oauth_state(user_id: str, workspace_id: str) -> str:
 
 def decode_oauth_state(state: str) -> dict:
     data = decode_token(state)
-    if data.get("purpose") != "google_oauth":
+    if data.get("purpose") not in {"google_oauth", "platform_oauth"}:
         raise jwt.InvalidTokenError("OAuth state is invalid")
     return data
 

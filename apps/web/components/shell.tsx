@@ -15,13 +15,27 @@ const LINKS = [
   ["/trends", "Trends"],
 ];
 
-type Account = { id: string; account_name: string; customer_id: string };
+type Account = {
+  id: string;
+  account_name: string;
+  customer_id: string;
+  platform_label?: string;
+  search_terms?: boolean;
+  changes?: boolean;
+};
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selected, setSelected] = useState("");
+  const current = accounts.find((account) => account.id === selected);
+  const links = LINKS.filter(([href]) => {
+    if (!current) return true;
+    if (href === "/search-terms") return current.search_terms !== false;
+    if (href === "/changes") return current.changes !== false;
+    return true;
+  });
 
   useEffect(() => {
     if (!token()) {
@@ -52,7 +66,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             Ads analyst
           </Link>
           <nav className="flex flex-wrap gap-3 text-sm">
-            {LINKS.map(([href, label]) => (
+            {links.map(([href, label]) => (
               <Link key={href} href={href} className={pathname === href ? "font-semibold text-pine" : "text-neutral-600"}>
                 {label}
               </Link>
@@ -60,7 +74,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </nav>
           <div className="ml-auto flex items-center gap-3">
             <select
-              aria-label="Google Ads account"
+              aria-label="Advertising account"
               className="rounded-md border border-line bg-paper px-2 py-1 text-sm"
               value={selected}
               onChange={(event) => {
@@ -73,7 +87,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               {accounts.length === 0 ? <option value="">No account</option> : null}
               {accounts.map((account) => (
                 <option key={account.id} value={account.id}>
-                  {account.account_name || account.customer_id}
+                  {account.platform_label ? `${account.account_name || account.customer_id} · ${account.platform_label}` : account.account_name || account.customer_id}
                 </option>
               ))}
             </select>

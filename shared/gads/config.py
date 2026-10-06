@@ -20,6 +20,19 @@ class Settings(BaseSettings):
     google_oauth_redirect_uri: str = "http://localhost:8000/api/google/oauth/callback"
     google_ads_api_version: str = "v25"
 
+    microsoft_ads_client_id: str = ""
+    microsoft_ads_client_secret: str = ""
+    microsoft_ads_developer_token: str = ""
+    meta_app_id: str = ""
+    meta_app_secret: str = ""
+    linkedin_client_id: str = ""
+    linkedin_client_secret: str = ""
+    x_client_id: str = ""
+    x_client_secret: str = ""
+    reddit_client_id: str = ""
+    reddit_client_secret: str = ""
+    # OAuth callbacks use {GADS_API_BASE_URL}/api/platforms/{platform}/oauth/callback
+
     sync_initial_lookback_days: int = 90
     sync_history_lookback_days: int = 395
     ingest_max_days: int = 400

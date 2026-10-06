@@ -7,12 +7,16 @@ import { API_URL, api } from "@/lib/api";
 type Account = {
   id: string;
   workspace_id: string;
+  platform_label?: string;
+  sync_ready?: boolean;
   account_name: string;
   customer_id: string;
   status: string;
   currency_code: string;
   last_successful_sync_at: string | null;
 };
+
+type PlatformChoice = { id: string; label: string };
 
 type SyncStatus = {
   status: "idle" | "running" | "completed" | "failed";
@@ -66,6 +70,7 @@ const HELP_LINKS: Record<string, { href: string; label: string }> = {
 
 export function AccountsPanel() {
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [platforms, setPlatforms] = useState<PlatformChoice[]>([]);
   const [message, setMessage] = useState("");
   const [messageIsError, setMessageIsError] = useState(true);
   const [helpLink, setHelpLink] = useState<{ href: string; label: string } | null>(null);
@@ -90,6 +95,9 @@ export function AccountsPanel() {
       setHelpLink(HELP_LINKS[error] ?? null);
     }
     load();
+    api<{ platforms: PlatformChoice[] }>("/api/platforms")
+      .then((payload) => setPlatforms(payload.platforms))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -124,13 +132,35 @@ export function AccountsPanel() {
     };
   }, [accounts, watchSync]);
 
-  async function connect() {
+  async function workspaceTarget() {
     const workspaceId = accounts[0]?.workspace_id;
     const me = await api<{ workspaces: { id: string }[] }>("/api/auth/me");
-    const target = workspaceId ?? me.workspaces[0]?.id;
-    if (!target) return;
-    const started = await api<{ url: string }>("/api/google/oauth/start", { method: "POST", body: JSON.stringify({ workspace_id: target }) });
-    window.location.href = started.url;
+    return workspaceId ?? me.workspaces[0]?.id;
+  }
+
+  async function connectPlatform(platformId: string) {
+    setHelpLink(null);
+    setMessage("");
+    try {
+      const target = await workspaceTarget();
+      if (!target) return;
+      if (platformId === "google") {
+        const started = await api<{ url: string }>("/api/google/oauth/start", {
+          method: "POST",
+          body: JSON.stringify({ workspace_id: target }),
+        });
+        window.location.href = started.url;
+        return;
+      }
+      const started = await api<{ url: string }>(`/api/platforms/${platformId}/connect`, {
+        method: "POST",
+        body: JSON.stringify({ workspace_id: target }),
+      });
+      window.location.href = started.url;
+    } catch (reason) {
+      setMessageIsError(true);
+      setMessage(reason instanceof Error ? reason.message : "Could not connect that platform.");
+    }
   }
 
   async function sync(accountId: string) {
@@ -153,7 +183,17 @@ export function AccountsPanel() {
     <section id="accounts">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-xl font-semibold">Accounts</h2>
-        <button className="rounded-md bg-pine px-3 py-2 text-sm text-white" onClick={connect}>Connect Google Ads</button>
+      </div>
+      <div className="mb-4 flex flex-wrap gap-2">
+        {(platforms.length ? platforms : [{ id: "google", label: "Google Ads" }]).map((platform) => (
+          <button
+            key={platform.id}
+            className={platform.id === "google" ? "rounded-md bg-pine px-3 py-2 text-sm text-white" : "rounded-md border border-line px-3 py-2 text-sm"}
+            onClick={() => void connectPlatform(platform.id)}
+          >
+            Connect {platform.label}
+          </button>
+        ))}
       </div>
       {message ? <p className={`mb-3 text-sm ${messageIsError ? "text-red-700" : "text-neutral-700"}`}>{message}</p> : null}
       {helpLink ? (
@@ -164,7 +204,7 @@ export function AccountsPanel() {
         </p>
       ) : null}
       <Panel title="Connected accounts">
-        {accounts.length === 0 ? <p className="text-sm text-neutral-600">No Google Ads customer is connected yet.</p> : null}
+        {accounts.length === 0 ? <p className="text-sm text-neutral-600">No advertising account is connected yet.</p> : null}
         {accounts.map((account) => {
           const progress = progressByAccount[account.id];
           const syncing = progress?.status === "running";
@@ -173,10 +213,15 @@ export function AccountsPanel() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="font-medium">{account.account_name || account.customer_id}</p>
-                  <p className="text-neutral-600">{account.customer_id} · {account.currency_code} · {account.status}</p>
+                  <p className="text-neutral-600">{account.platform_label ?? "Google Ads"} · {account.customer_id} · {account.currency_code} · {account.status}</p>
                   <p className="text-neutral-500">Last sync {account.last_successful_sync_at ?? "never"}</p>
                 </div>
-                <button className="rounded-md border border-line px-3 py-1 disabled:opacity-60" disabled={syncing} onClick={() => sync(account.id)}>
+                <button
+                  className="rounded-md border border-line px-3 py-1 disabled:opacity-60"
+                  disabled={syncing || account.sync_ready === false}
+                  onClick={() => sync(account.id)}
+                  title={account.sync_ready === false ? "Sync for this platform is next" : undefined}
+                >
                   {syncing ? "Syncing" : "Sync"}
                 </button>
               </div>

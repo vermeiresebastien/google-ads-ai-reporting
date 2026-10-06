@@ -9,6 +9,7 @@ from fastapi.responses import RedirectResponse
 from gads.config import get_settings
 from gads.db import get_db
 from gads.models import AccountAnalyticsSettings, AdAccount, GoogleConnection, User, WorkspaceMember
+from gads.platforms import account_public
 from gads.security import create_oauth_state, decode_oauth_state, encrypt_secret
 from gads_ingestion.discover import discover_accounts
 from gads_ingestion.google_ads.client import build_client_for_refresh_token
@@ -158,11 +159,17 @@ def oauth_callback(code: str, state: str, session: Session = Depends(get_db)):
             )
         )
         if account is None:
-            account = AdAccount(workspace_id=workspace_id, connection_id=connection.id, customer_id=item["customer_id"])
+            account = AdAccount(
+                workspace_id=workspace_id,
+                connection_id=connection.id,
+                customer_id=item["customer_id"],
+                platform="google",
+            )
             session.add(account)
             session.flush()
             session.add(AccountAnalyticsSettings(account_id=account.id))
         account.connection_id = connection.id
+        account.platform = "google"
         account.manager_customer_id = item["manager_customer_id"]
         account.account_name = item["account_name"]
         account.currency_code = item["currency_code"]
@@ -179,22 +186,7 @@ def list_accounts(user: User = Depends(current_user), session: Session = Depends
     if not workspace_ids:
         return {"accounts": []}
     accounts = session.scalars(select(AdAccount).where(AdAccount.workspace_id.in_(workspace_ids))).all()
-    return {
-        "accounts": [
-            {
-                "id": account.id,
-                "workspace_id": account.workspace_id,
-                "customer_id": account.customer_id,
-                "manager_customer_id": account.manager_customer_id,
-                "account_name": account.account_name,
-                "currency_code": account.currency_code,
-                "timezone": account.timezone,
-                "status": account.status,
-                "last_successful_sync_at": account.last_successful_sync_at.isoformat() if account.last_successful_sync_at else None,
-            }
-            for account in accounts
-        ]
-    }
+    return {"accounts": [account_public(account) for account in accounts]}
 
 
 @router.post("/accounts/{account_id}/sync", status_code=202)
@@ -207,6 +199,13 @@ def sync_account(
     account = authorized_account(account_id, user, session)
     if body.mode not in {"initial", "daily", "weekly", "history"} and not (body.start_date and body.end_date):
         raise HTTPException(status_code=400, detail="mode must be initial, daily, weekly, or history")
+    platform = getattr(account, "platform", None) or "google"
+    if platform != "google":
+        label = account_public(account)["platform_label"]
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label} is connected. Sync for that platform is the next step after Google.",
+        )
     start = None
     end = None
     if body.start_date and body.end_date:

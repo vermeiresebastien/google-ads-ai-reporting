@@ -5,6 +5,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from gads.config import get_settings
+from gads.platforms import ensure_account_platform
 
 _engine = None
 _session_factory = None
@@ -27,6 +28,7 @@ def get_engine():
                 cursor.close()
 
         _session_factory = sessionmaker(bind=_engine, expire_on_commit=False)
+        ensure_account_platform(_engine)
     return _engine
 
 

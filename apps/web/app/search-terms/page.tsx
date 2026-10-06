@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Panel, Shell } from "@/components/shell";
 import { Term as MetricTerm } from "@/components/term";
 import { api } from "@/lib/api";
-import { useAccountId } from "@/lib/use-account";
+import { useSelectedAccount } from "@/lib/use-account";
 import { money, num, recentRange } from "@/lib/format";
 
 const RANGES = [7, 30, 90, 365] as const;
@@ -17,15 +17,25 @@ export default function SearchTermsPage() {
   const [waste, setWaste] = useState<Waste[]>([]);
   const [days, setDays] = useState<(typeof RANGES)[number]>(7);
 
-  const id = useAccountId();
+  const account = useSelectedAccount();
+  const id = account?.id ?? "";
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || account?.search_terms === false) return;
     const range = recentRange(days);
     const query = `account_id=${id}&start_date=${range.start}&end_date=${range.end}`;
     api<{ rows: Term[] }>(`/api/search-terms?${query}&limit=100`).then((payload) => setRows(payload.rows)).catch(() => undefined);
     api<{ rows: Waste[] }>(`/api/wasted-spend?${query}`).then((payload) => setWaste(payload.rows)).catch(() => undefined);
-  }, [id, days]);
+  }, [id, days, account?.search_terms]);
+
+  if (account && !account.search_terms) {
+    return (
+      <Shell>
+        <h1 className="mb-4 text-2xl font-semibold">Search terms</h1>
+        <p className="text-sm text-neutral-600">Search terms are available for Google Ads and Microsoft Advertising. {account.platform_label} uses the dashboard, campaigns, reports, and trends.</p>
+      </Shell>
+    );
+  }
 
   return (
     <Shell>

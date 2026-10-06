@@ -9,9 +9,28 @@ import { api } from "@/lib/api";
 import { useAccountId } from "@/lib/use-account";
 import { describeRange, money, num, pct, rangeError, recentRange } from "@/lib/format";
 
-type Row = { campaign_id: string; name: string; cost: number; conversions: number; cost_per_conversion: number | null; roas: number | null; clicks: number; impressions: number };
+type Row = {
+  campaign_id: string;
+  name: string;
+  status: string;
+  daily_budget: number | null;
+  cost: number;
+  conversions: number;
+  cost_per_conversion: number | null;
+  roas: number | null;
+  clicks: number;
+  impressions: number;
+};
 
 const initialRange = recentRange(90);
+
+function statusLabel(status: string) {
+  const value = (status || "").toUpperCase();
+  if (value === "ENABLED") return "Active";
+  if (value === "PAUSED") return "Paused";
+  if (value === "REMOVED") return "Removed";
+  return status || "—";
+}
 
 export default function CampaignsPage() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -41,6 +60,8 @@ export default function CampaignsPage() {
             <thead className="text-neutral-500">
               <tr>
                 <th className="py-2">Campaign</th>
+                <th>Status</th>
+                <th>Daily budget</th>
                 <th><Term>Spend</Term></th>
                 <th><Term>Conv.</Term></th>
                 <th><Term>CPA</Term></th>
@@ -50,11 +71,15 @@ export default function CampaignsPage() {
             </thead>
             <tbody>
               {rows.length === 0 ? (
-                <tr><td className="py-3 text-neutral-600" colSpan={6}>No campaign stats in this range.</td></tr>
+                <tr><td className="py-3 text-neutral-600" colSpan={8}>No campaign stats in this range.</td></tr>
               ) : null}
               {rows.map((row) => (
                 <tr key={row.campaign_id} className="border-t border-line">
                   <td className="py-2"><Link className="text-pine" href={`/campaigns/${row.campaign_id}?start=${span.start}&end=${span.end}`}>{row.name}</Link></td>
+                  <td className={row.status?.toUpperCase() === "ENABLED" ? "text-pine" : "text-neutral-600"}>
+                    {statusLabel(row.status)}
+                  </td>
+                  <td>{money(row.daily_budget)}</td>
                   <td>{money(row.cost)}</td>
                   <td>{num(row.conversions)}</td>
                   <td>{money(row.cost_per_conversion)}</td>

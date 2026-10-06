@@ -98,6 +98,18 @@ def _campaign_names(session: Session, account_id: str) -> dict[str, str]:
     return {row.id: row.name for row in rows}
 
 
+def _campaign_meta(session: Session, account_id: str) -> dict[str, dict]:
+    rows = session.scalars(select(Campaign).where(Campaign.account_id == account_id)).all()
+    return {
+        row.id: {
+            "name": row.name,
+            "status": row.status or "",
+            "daily_budget": float(row.daily_budget) if row.daily_budget is not None else None,
+        }
+        for row in rows
+    }
+
+
 def _rows_between(session: Session, account_id: str, start: date, end: date) -> list[CampaignDaily]:
     return list(
         session.scalars(
@@ -266,14 +278,17 @@ def daily_series(rows: list[CampaignDaily]) -> list[dict]:
 
 
 def campaign_performance(session: Session, account_id: str, start: date, end: date, limit: int, offset: int) -> dict:
-    names = _campaign_names(session, account_id)
+    meta = _campaign_meta(session, account_id)
     grouped = _by_campaign(_rows_between(session, account_id, start, end))
     lost = _weighted_lost_is(session, account_id, start, end)
     rows = []
     for campaign_id, totals in grouped.items():
+        info = meta.get(campaign_id) or {}
         metrics = totals.as_dict()
         metrics["campaign_id"] = campaign_id
-        metrics["name"] = names.get(campaign_id, campaign_id)
+        metrics["name"] = info.get("name") or campaign_id
+        metrics["status"] = info.get("status") or ""
+        metrics["daily_budget"] = info.get("daily_budget")
         metrics["budget_lost_impression_share"] = lost.get(campaign_id)
         rows.append(metrics)
     rows.sort(key=lambda item: item["cost"], reverse=True)

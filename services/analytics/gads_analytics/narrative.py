@@ -113,8 +113,16 @@ def render_report(report: dict) -> str:
         )
     lines.append("")
     lines.append("## What changed")
+    evidence_claims = report.get("evidence") or []
+    if evidence_claims:
+        for claim in evidence_claims:
+            confidence = claim.get("confidence")
+            suffix = f" ({confidence} confidence)" if confidence else ""
+            lines.append(f"- Claim{suffix}: {claim.get('claim')}")
+            for item in claim.get("evidence") or []:
+                lines.append(f"  - Evidence: {item}")
     top_changes = report.get("top_changes") or []
-    if not top_changes:
+    if not top_changes and not evidence_claims:
         lines.append("No campaign moved enough to list.")
     for change in top_changes:
         lines.append(
@@ -124,19 +132,16 @@ def render_report(report: dict) -> str:
         )
     lines.append("")
     lines.append("## Why it changed")
-    claims = report.get("campaign_drivers") or {}
-    pressure = (claims.get("increased_cpa") or [])[:3]
-    if not pressure:
+    drivers = report.get("campaign_drivers") or {}
+    why_lines = _why_driver_lines(drivers)
+    if not why_lines:
         lines.append("No campaign-level driver is large enough to single out.")
-    for row in pressure:
-        current_row = row.get("current") or {}
-        previous_row = row.get("previous") or {}
+    else:
+        lines.extend(why_lines)
         lines.append(
-            f"- {row['name']} is a main CPA-pressure campaign. "
-            f"CPC moved from {_num(previous_row.get('average_cpc'))} to {_num(current_row.get('average_cpc'))} "
-            f"and conversion rate moved from {_num(previous_row.get('conversion_rate'))} to {_num(current_row.get('conversion_rate'))}."
+            "Hypothesis: the metric movements above are observations from the comparison. "
+            "This report does not prove the underlying cause."
         )
-        lines.append("Hypothesis: the metric movement is described above. This report does not prove the cause.")
     lines.append("")
     lines.append("## Problems")
     anomalies = report.get("anomalies") or []
@@ -144,7 +149,9 @@ def render_report(report: dict) -> str:
     if not anomalies and not waste:
         lines.append("No anomaly or waste candidate crossed the configured thresholds.")
     for anomaly in anomalies:
-        lines.append(f"- Anomaly {anomaly['type']}: {'; '.join(anomaly.get('evidence') or [])}.")
+        confidence = anomaly.get("confidence")
+        suffix = f" ({confidence} confidence)" if confidence else ""
+        lines.append(f"- Anomaly {anomaly['type']}{suffix}: {'; '.join(anomaly.get('evidence') or [])}.")
     for item in waste:
         lines.append(f"- Waste candidate {item['name']}: {'; '.join(item.get('reasons') or [])}.")
     lines.append("")
@@ -153,11 +160,17 @@ def render_report(report: dict) -> str:
     if not opportunities:
         lines.append("No budget opportunity has both a material budget constraint and acceptable efficiency.")
     for item in opportunities:
-        lines.append(f"- {item['name']}: {'; '.join(item.get('evidence') or [])}.")
+        confidence = item.get("confidence")
+        suffix = f" ({confidence} confidence)" if confidence else ""
+        lines.append(f"- {item['name']}{suffix}: {'; '.join(item.get('evidence') or [])}.")
     lines.append("")
     lines.append("## Recommended actions")
     for action in report.get("recommended_actions") or []:
-        lines.append(f"- {action['action']} Evidence: {'; '.join(action.get('evidence') or [])}.")
+        confidence = action.get("confidence")
+        suffix = f" ({confidence} confidence)" if confidence else ""
+        lines.append(
+            f"- {action['action']}{suffix} Evidence: {'; '.join(action.get('evidence') or [])}."
+        )
     recent = report.get("recent_changes") or []
     if recent:
         lines.append("")
@@ -169,6 +182,39 @@ def render_report(report: dict) -> str:
                 f"by {change.get('user_email') or 'unknown user'} via {change.get('client_type') or 'unknown client'}."
             )
     return "\n".join(lines)
+
+
+_DRIVER_LABELS = (
+    ("increased_cpa", "CPA-pressure"),
+    ("lost_conversions", "lost-conversions"),
+    ("increased_spend", "increased-spend"),
+    ("reduced_conversion_value", "reduced-conversion-value"),
+)
+
+
+def _why_driver_lines(drivers: dict) -> list[str]:
+    lines: list[str] = []
+    seen: set[str] = set()
+    for bucket, label in _DRIVER_LABELS:
+        for row in (drivers.get(bucket) or [])[:2]:
+            campaign_id = str(row.get("campaign_id") or row.get("name") or "")
+            if campaign_id in seen:
+                continue
+            seen.add(campaign_id)
+            current_row = row.get("current") or {}
+            previous_row = row.get("previous") or {}
+            lines.append(
+                f"- {row['name']} is a main {label} campaign. "
+                f"Spend delta {_money(row.get('spend_delta'))}, "
+                f"conversion delta {_num(row.get('conversion_delta'))}, "
+                f"conversion value delta {_money(row.get('value_delta'))}. "
+                f"CPC moved from {_num(previous_row.get('average_cpc'))} to {_num(current_row.get('average_cpc'))} "
+                f"and conversion rate moved from {_num(previous_row.get('conversion_rate'))} "
+                f"to {_num(current_row.get('conversion_rate'))}."
+            )
+            if len(lines) >= 4:
+                return lines
+    return lines
 
 
 def tools_for_question(question: str) -> set[str]:

@@ -97,6 +97,22 @@ function arrow(direction: Movement["direction"], percent: number | null) {
   return percent > 0 ? "↑" : "↓";
 }
 
+function findingsStorageKey(accountId: string, start: string, end: string) {
+  return `gads_trend_findings:${accountId}:${start}:${end}`;
+}
+
+function loadCheckedFindings(key: string): Record<string, boolean> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, boolean>;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function FeedOverview({ feed }: { feed: StrategyFeed }) {
   const [open, setOpen] = useState(false);
   const period = feed.period ?? {};
@@ -211,6 +227,7 @@ export default function TrendsPage() {
   const [focusId, setFocusId] = useState("");
   const [printState, setPrintState] = useState<NotePrint | null>(null);
   const [savedOpen, setSavedOpen] = useState(false);
+  const [checkedFindings, setCheckedFindings] = useState<Record<string, boolean>>({});
   const onPrint = useCallback((state: NotePrint) => setPrintState(state), []);
   const onSavedOpen = useCallback((open: boolean) => setSavedOpen(open), []);
 
@@ -228,6 +245,24 @@ export default function TrendsPage() {
   const problem = rangeError(span.start, span.end);
   const selected = METRICS.find((item) => item[0] === metric) ?? METRICS[0];
   const movements = new Map(report?.movements.map((item) => [item.metric, item]) ?? []);
+
+  useEffect(() => {
+    if (!id || problem) {
+      setCheckedFindings({});
+      return;
+    }
+    setCheckedFindings(loadCheckedFindings(findingsStorageKey(id, span.start, span.end)));
+  }, [id, span.start, span.end, problem]);
+
+  function toggleFinding(line: string) {
+    setCheckedFindings((current) => {
+      const next = { ...current, [line]: !current[line] };
+      if (id) {
+        localStorage.setItem(findingsStorageKey(id, span.start, span.end), JSON.stringify(next));
+      }
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (!id || problem) return;
@@ -346,11 +381,24 @@ export default function TrendsPage() {
       <div className="mt-4">
         <Panel title="What changed across the period">
           {report?.findings.length ? (
-            <div className="space-y-2 text-sm">
-              {report.findings.map((line) => (
-                <p key={line}>{line}</p>
-              ))}
-            </div>
+            <ul className="space-y-2 text-sm">
+              {report.findings.map((line) => {
+                const checked = Boolean(checkedFindings[line]);
+                return (
+                  <li key={line}>
+                    <label className="flex cursor-pointer items-start gap-3">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 shrink-0 rounded border-line accent-pine"
+                        checked={checked}
+                        onChange={() => toggleFinding(line)}
+                      />
+                      <span className={checked ? "text-neutral-500 line-through" : ""}>{line}</span>
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
           ) : (
             <p className="text-sm text-neutral-600">{id && !problem ? "Loading the trend." : "Choose an account and a period."}</p>
           )}

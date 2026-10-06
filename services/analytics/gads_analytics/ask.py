@@ -177,4 +177,5 @@ def answer_strategy(session: Session, account: AdAccount, question: str, start: 
         "notice": notice,
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
+        "ai_context": context,
     }

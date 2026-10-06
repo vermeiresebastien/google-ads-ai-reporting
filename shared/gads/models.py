@@ -460,3 +460,32 @@ class SettingsPreset(Base):
     name: Mapped[str] = mapped_column(String(80))
     values: Mapped[dict] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class ProposedAction(Base):
+    """Human-confirmed Google Ads mutations derived from structured waste/budget findings."""
+
+    __tablename__ = "proposed_actions"
+    __table_args__ = (UniqueConstraint("account_id", "fingerprint", name="uq_proposed_action_fingerprint"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("ad_accounts.id", ondelete="CASCADE"), index=True)
+    campaign_id: Mapped[str | None] = mapped_column(ForeignKey("campaigns.id", ondelete="SET NULL"), nullable=True, index=True)
+    action_type: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="proposed", index=True)
+    fingerprint: Mapped[str] = mapped_column(String(255))
+    title: Mapped[str] = mapped_column(String(300), default="")
+    rationale: Mapped[str] = mapped_column(Text, default="")
+    evidence: Mapped[list] = mapped_column(JSON, default=list)
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    confidence: Mapped[str] = mapped_column(String(16), default="medium")
+    source_kind: Mapped[str] = mapped_column(String(64), default="")
+    source_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    created_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    applied_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    google_response: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

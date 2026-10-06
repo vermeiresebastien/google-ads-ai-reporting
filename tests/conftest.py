@@ -7,6 +7,7 @@ os.environ["TOKEN_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
 os.environ["JWT_SECRET"] = "test-secret"
 os.environ["DATABASE_URL"] = "sqlite+pysqlite:///:memory:"
 os.environ["SENTRY_DSN"] = ""
+os.environ["ALLOW_GOOGLE_MUTATIONS"] = "false"
 
 from gads.config import get_settings
 

@@ -192,17 +192,35 @@ def delete_saved_highlight(session: Session, account_id: str, report_id: str, hi
 
 
 def rename_saved_report(session: Session, account_id: str, report_id: str, title: str) -> dict | None:
+    return update_saved_report(session, account_id, report_id, title=title)
+
+
+def update_saved_report(
+    session: Session,
+    account_id: str,
+    report_id: str,
+    title: str | None = None,
+    body: str | None = None,
+) -> dict | None:
     ensure_saved_reports_table(session)
     row = session.scalar(select(SavedReport).where(SavedReport.id == report_id, SavedReport.account_id == account_id))
     if row is None:
         return None
-    cleaned = " ".join(title.split()).strip()
-    if len(cleaned) > 200:
-        raise ValueError("Enter a shorter title")
-    row.title = cleaned
+    if title is None and body is None:
+        raise ValueError("Change the title or the note.")
+    if title is not None:
+        cleaned = " ".join(title.split()).strip()
+        if len(cleaned) > 200:
+            raise ValueError("Enter a shorter title")
+        row.title = cleaned
+    if body is not None:
+        cleaned_body = body.replace("\r\n", "\n")
+        if len(cleaned_body) > 200_000:
+            raise ValueError("That note is too long.")
+        row.body = cleaned_body
     row.updated_at = utcnow()
     session.commit()
-    return {"id": row.id, "title": row.title}
+    return {"id": row.id, "title": row.title, "body": row.body}
 
 
 def delete_saved_report(session: Session, account_id: str, report_id: str) -> bool:

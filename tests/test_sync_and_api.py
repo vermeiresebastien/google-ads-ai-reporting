@@ -84,7 +84,11 @@ def test_daily_report_names_the_driver(session):
     assert report["channels"]["channels"][0]["label"] == "Search"
     assert report["channels"]["brand"]["cost"] > 0
     assert report["channels"]["other"]["cost"] > report["channels"]["brand"]["cost"]
-    assert len(report["series"]) >= 7
+    assert [point["date"] for point in report["series"]] == ["2026-09-14", "2026-09-15"]
+    week = build_report(session, account, "last_7_vs_prev_7", date(2026, 9, 15))
+    assert week["series"][0]["date"] == "2026-09-09"
+    assert week["series"][-1]["date"] == "2026-09-15"
+    assert len(week["series"]) == 7
     assert len(report["recommended_actions"]) <= 3
 
 
@@ -198,6 +202,14 @@ def test_daily_report_is_saved(client, session):
     )
     assert renamed.status_code == 200
     assert renamed.json()["title"] == "Quarter review"
+    edited = client.patch(
+        f"/api/reports/saved/{rows[0]['id']}",
+        params={"account_id": seeded["account_id"]},
+        headers=headers,
+        json={"body": "Edited executive summary for the quarter."},
+    )
+    assert edited.status_code == 200
+    assert edited.json()["body"] == "Edited executive summary for the quarter."
     painted = client.post(
         f"/api/reports/saved/{rows[0]['id']}/highlights",
         params={"account_id": seeded["account_id"]},

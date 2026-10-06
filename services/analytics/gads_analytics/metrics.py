@@ -89,7 +89,12 @@ def _shift_months(day: date, months: int) -> date:
     return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
 
 
-def window_for(kind: str, as_of: date) -> tuple[tuple[date, date], tuple[date, date], str]:
+def window_for(
+    kind: str,
+    as_of: date,
+    *,
+    history_start: date | None = None,
+) -> tuple[tuple[date, date], tuple[date, date], str]:
     """Return current bounds, previous bounds, and normalization mode."""
     if kind == "today_vs_yesterday":
         return (as_of, as_of), (as_of - timedelta(days=1), as_of - timedelta(days=1)), "totals"
@@ -116,6 +121,14 @@ def window_for(kind: str, as_of: date) -> tuple[tuple[date, date], tuple[date, d
         previous_start_month = ((previous.month - 1) // 3) * 3 + 1
         previous_start = date(previous.year, previous_start_month, 1)
         return (current_start, as_of), (previous_start, previous), "totals"
+    if kind == "all_time":
+        start = history_start or as_of
+        if start > as_of:
+            start = as_of
+        days = (as_of - start).days + 1
+        previous_end = start - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=days - 1)
+        return (start, as_of), (previous_start, previous_end), "totals"
     raise ValueError(f"Unknown comparison kind: {kind}")
 
 

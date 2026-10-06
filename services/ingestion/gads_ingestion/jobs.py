@@ -77,7 +77,10 @@ def _execute(account_id: str, dataset: str, callback, start: date | None = None,
                 error_message=str(exc)[:2000],
             )
             session.add(failed)
-            session.commit()
+            try:
+                session.commit()
+            except Exception:
+                session.rollback()
             logger.error("sync_failed", account_id=account_id, dataset=dataset, error=failed.error_message)
             raise
     finally:

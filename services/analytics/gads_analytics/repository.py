@@ -60,6 +60,11 @@ def latest_data_date(session: Session, account_id: str) -> date | None:
     return value
 
 
+def earliest_data_date(session: Session, account_id: str) -> date | None:
+    value = session.scalar(select(func.min(CampaignDaily.date)).where(CampaignDaily.account_id == account_id))
+    return value
+
+
 def resolve_as_of(session: Session, account_id: str, as_of: date | None) -> date:
     if as_of is not None:
         return as_of
@@ -124,7 +129,8 @@ def _filter_dates(rows: list[CampaignDaily], dates: set[date]) -> list[CampaignD
 
 
 def comparison(session: Session, account_id: str, kind: str, as_of: date) -> dict:
-    current_bounds, previous_bounds, normalization = window_for(kind, as_of)
+    history_start = earliest_data_date(session, account_id) if kind == "all_time" else None
+    current_bounds, previous_bounds, normalization = window_for(kind, as_of, history_start=history_start)
     current_rows = _rows_between(session, account_id, *current_bounds)
     previous_rows = _rows_between(session, account_id, *previous_bounds)
     current = _sum_rows(current_rows)
@@ -457,8 +463,9 @@ def build_report(session: Session, account: AdAccount, kind: str, as_of: date | 
     end_dt = datetime.combine(current_bounds[1], datetime.max.time(), tzinfo=UTC)
     changes = list_changes(session, account.id, start_dt, end_dt, limit=20)
     actions = recommendations(anomalies, waste, budgets, changes)
-    chart_end = current_bounds[1]
-    chart_start = chart_end - timedelta(days=89)
+    chart_start, chart_end = current_bounds
+    if chart_start == chart_end:
+        chart_start = chart_end - timedelta(days=1)
     chart_changes = list_changes(
         session,
         account.id,

@@ -13,6 +13,8 @@ const LINKS = [
   ["/changes", "Changes"],
   ["/reports", "Reports"],
   ["/trends", "Trends"],
+  ["/actions", "Actions"],
+  ["/raw-data", "Raw Data"],
 ];
 
 type Account = {

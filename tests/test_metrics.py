@@ -72,6 +72,17 @@ def test_history_windows_cover_month_quarter_and_ninety_days():
     assert clamped_previous == (date(2026, 2, 1), date(2026, 2, 28))
 
 
+def test_all_time_uses_history_start_and_equal_prior_window():
+    current, previous, normalization = window_for("all_time", date(2026, 9, 15), history_start=date(2026, 9, 2))
+    assert current == (date(2026, 9, 2), date(2026, 9, 15))
+    assert previous == (date(2026, 8, 19), date(2026, 9, 1))
+    assert (current[1] - current[0]).days == (previous[1] - previous[0]).days
+    assert normalization == "totals"
+    alone_current, alone_previous, _ = window_for("all_time", date(2026, 9, 15))
+    assert alone_current == (date(2026, 9, 15), date(2026, 9, 15))
+    assert alone_previous == (date(2026, 9, 14), date(2026, 9, 14))
+
+
 def test_history_sync_chunks_long_ranges():
     start, end = date_window("history", date(2026, 10, 6))
     assert (end - start).days + 1 == 395

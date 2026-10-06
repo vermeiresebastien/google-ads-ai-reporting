@@ -10,6 +10,7 @@ from gads_analytics.saved_reports import (
     rename_saved_report,
     save_trend_summary,
     trend_notes_zip,
+    update_saved_report,
 )
 from gads_analytics.trends import build_trends, strategy_context
 from report_fixture import seed_report_account
@@ -142,15 +143,16 @@ def test_saved_trends_stay_separate_and_keep_a_rename(session):
     assert first == again
     assert other != first
     assert rename_saved_report(session, account_id, first, "Quarter check")["title"] == "Quarter check"
+    assert update_saved_report(session, account_id, first, body="Spend rose. Edited.")["body"] == "Spend rose. Edited."
     rows = [row for row in list_saved_reports(session, account_id) if row["kind"].startswith("trend:")]
     assert len(rows) == 2
     kept = next(row for row in rows if row["id"] == first)
     assert kept["title"] == "Quarter check"
-    assert kept["body"] == "Spend rose further."
+    assert kept["body"] == "Spend rose. Edited."
     assert kept["period_start"] == "2026-09-02"
 
     payload, filename = trend_notes_zip(session, account_id, date(2026, 9, 1), date(2026, 9, 30))
     assert filename == "2026-09-01-to-2026-09-30-trends.zip"
     archive = zipfile.ZipFile(io.BytesIO(payload))
     assert archive.namelist() == ["2026-09-02-quarter-check-full.txt"]
-    assert archive.read("2026-09-02-quarter-check-full.txt") == b"Spend rose further."
+    assert archive.read("2026-09-02-quarter-check-full.txt") == b"Spend rose. Edited."

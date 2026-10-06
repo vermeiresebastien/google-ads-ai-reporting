@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { SeriesChart } from "@/components/series-chart";
 import { Term } from "@/components/term";
@@ -38,6 +39,7 @@ const PERIODS = [
   ["last_90_vs_prev_90", "Last 90 days"],
   ["month_to_date_vs_prev", "This month"],
   ["quarter_to_date_vs_prev", "This quarter"],
+  ["all_time", "All time"],
 ] as const;
 
 function share(value?: number | null) {
@@ -124,7 +126,7 @@ export default function DashboardPage() {
       ) : null}
 
       <div className="mt-4">
-        <Panel title="Spend, conversions, and account edits">
+        <Panel title={report ? `Spend, conversions, and account edits · ${report.comparison.period.current_start} to ${report.comparison.period.current_end}` : "Spend, conversions, and account edits"}>
           <SeriesChart points={report?.series ?? []} changes={report?.change_marks ?? []} />
           {report?.change_marks?.length ? (
             <div className="mt-3 space-y-1 text-sm">
@@ -132,7 +134,9 @@ export default function DashboardPage() {
                 <p key={mark.date + mark.label}><span className="text-neutral-500">{mark.date}</span> {mark.label}</p>
               ))}
             </div>
-          ) : <p className="mt-3 text-sm text-neutral-600">No account edits are stored for this chart. Google only returns 30 days of change history, and only after that step of sync succeeds.</p>}
+          ) : report ? (
+            <p className="mt-3 text-sm text-neutral-600">No account edits are stored for this period. Google only returns 30 days of change history, and only after that step of sync succeeds.</p>
+          ) : null}
         </Panel>
       </div>
 
@@ -217,6 +221,11 @@ export default function DashboardPage() {
               {item.evidence.length ? <p className="text-neutral-600">{item.evidence.join(" ")}</p> : null}
             </div>
           ))}
+          <p className="mt-3 text-sm">
+            <Link className="text-pine underline" href="/actions">
+              Review and apply structured actions
+            </Link>
+          </p>
         </Panel>
       </div>
     </Shell>

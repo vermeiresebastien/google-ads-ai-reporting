@@ -6,12 +6,29 @@ class FakeGoogleAdsClient:
 
     def __init__(self, fixtures: dict | None = None):
         self.fixtures = fixtures or default_fixtures()
+        self.mutations: list[dict] = []
 
     def list_accessible_customers(self) -> list[str]:
         return list(self.fixtures.get("accessible", ["customers/1234567890"]))
 
     def search(self, customer_id: str, query: str) -> list[dict]:
         compact = " ".join(query.split())
+        if "campaign_budget.resource_name" in compact and "FROM campaign" in compact and "segments.date" not in compact:
+            campaign_id = "111"
+            if "campaign.id =" in compact:
+                try:
+                    campaign_id = compact.split("campaign.id =", 1)[1].strip().split()[0]
+                except IndexError:
+                    campaign_id = "111"
+            return [
+                {
+                    "campaign": {"id": campaign_id},
+                    "campaign_budget": {
+                        "resource_name": f"customers/{customer_id}/campaignBudgets/{campaign_id}",
+                        "amount_micros": "50000000",
+                    },
+                }
+            ]
         if "FROM customer_client" in compact:
             return list(self.fixtures.get("customer_clients", []))
         if "FROM customer " in compact or compact.endswith("FROM customer"):
@@ -39,6 +56,47 @@ class FakeGoogleAdsClient:
         if "FROM campaign" in compact:
             return list(self.fixtures.get("campaigns", []))
         return []
+
+    def add_campaign_negative_keyword(
+        self,
+        customer_id: str,
+        google_campaign_id: str,
+        text: str,
+        match_type: str,
+        *,
+        validate_only: bool = False,
+    ) -> dict:
+        payload = {
+            "operation": "add_campaign_negative_keyword",
+            "customer_id": customer_id.replace("-", ""),
+            "google_campaign_id": google_campaign_id,
+            "keyword_text": text,
+            "match_type": match_type,
+            "validate_only": validate_only,
+            "results": [{"resource_name": f"customers/{customer_id}/campaignCriteria/{google_campaign_id}~neg"}],
+        }
+        self.mutations.append(payload)
+        return payload
+
+    def update_campaign_daily_budget(
+        self,
+        customer_id: str,
+        google_campaign_id: str,
+        amount_micros: int,
+        *,
+        validate_only: bool = False,
+    ) -> dict:
+        payload = {
+            "operation": "update_campaign_daily_budget",
+            "customer_id": customer_id.replace("-", ""),
+            "google_campaign_id": google_campaign_id,
+            "amount_micros": amount_micros,
+            "validate_only": validate_only,
+            "budget_resource_name": f"customers/{customer_id}/campaignBudgets/{google_campaign_id}",
+            "results": [{"resource_name": f"customers/{customer_id}/campaignBudgets/{google_campaign_id}"}],
+        }
+        self.mutations.append(payload)
+        return payload
 
 
 def default_fixtures() -> dict:

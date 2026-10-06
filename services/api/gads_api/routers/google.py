@@ -238,4 +238,6 @@ def account_sync_status(
     session: Session = Depends(get_db),
 ) -> dict:
     authorized_account(account_id, user, session)
+    # Release the request transaction before returning so a local sync thread can write.
+    session.commit()
     return sync_progress(account_id)

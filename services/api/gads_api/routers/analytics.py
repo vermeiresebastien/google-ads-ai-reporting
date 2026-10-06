@@ -10,7 +10,7 @@ from gads.models import AccountAnalyticsSettings, AdAccount, Campaign, User
 from gads_analytics.analysis import budget_opportunities, wasted_spend_candidates
 from gads_analytics.ask import answer_question, answer_strategy
 from gads_analytics.metrics import assert_equal_length
-from gads_analytics.narrative import render_report
+from gads_analytics.narrative import load_system_prompt, render_report
 from gads_analytics.repository import (
     _by_campaign,
     _campaign_names,
@@ -37,10 +37,10 @@ from gads_analytics.saved_reports import (
     delete_saved_highlight,
     delete_saved_report,
     list_saved_reports,
-    rename_saved_report,
     save_report_summary,
     save_trend_summary,
     trend_notes_zip,
+    update_saved_report,
 )
 from gads_analytics.settings_presets import (
     PresetNotFound,
@@ -51,7 +51,7 @@ from gads_analytics.settings_presets import (
     load_settings_preset,
     save_settings_preset,
 )
-from gads_analytics.trends import build_trends
+from gads_analytics.trends import build_trends, strategy_context
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -68,7 +68,8 @@ router = APIRouter(prefix="/api", tags=["analytics"])
 
 
 class SummaryTitleUpdate(BaseModel):
-    title: str = Field(default="", max_length=200)
+    title: str | None = Field(default=None, max_length=200)
+    body: str | None = Field(default=None, max_length=200_000)
 
 
 class HighlightCreate(BaseModel):
@@ -181,19 +182,19 @@ def delete_highlight(
 
 
 @router.patch("/reports/saved/{report_id}")
-def rename_saved(
+def update_saved(
     report_id: str,
     body: SummaryTitleUpdate,
     account: AdAccount = Depends(account_access),
     session: Session = Depends(get_db),
 ) -> dict:
     try:
-        renamed = rename_saved_report(session, account.id, report_id, body.title)
+        updated = update_saved_report(session, account.id, report_id, title=body.title, body=body.body)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if renamed is None:
+    if updated is None:
         raise HTTPException(status_code=404, detail="Saved summary was not found")
-    return renamed
+    return updated
 
 
 @router.delete("/reports/saved/{report_id}")
@@ -235,7 +236,8 @@ def trends(
     end_date: date | None = None,
 ) -> dict:
     start, end = resolve_dates(start_date, end_date)
-    return build_trends(session, account, start, end)
+    payload = build_trends(session, account, start, end)
+    return {**payload, "ai_context": strategy_context(payload)}
 
 
 @router.get("/trends/saved/export")
@@ -277,12 +279,14 @@ def daily_report(
     session: Session = Depends(get_db),
     as_of: date | None = None,
     kind: str = "yesterday_vs_prev7_avg",
+    save: bool = True,
 ) -> dict:
     try:
         report = build_report(session, account, kind, as_of)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    save_report_summary(session, account.id, report, render_report(report))
+    if save:
+        save_report_summary(session, account.id, report, render_report(report))
     return report
 
 
@@ -514,9 +518,13 @@ def changes(
     end_date: date | None = None,
     limit: int = 50,
 ) -> dict:
-    from datetime import UTC, datetime
+    from datetime import UTC, datetime, timedelta
 
-    start, end = resolve_dates(start_date, end_date)
+    # Include today so API applies and same-day Google edits are visible after sync.
+    end = end_date or date.today()
+    start = start_date or (end - timedelta(days=6))
+    if end < start:
+        raise HTTPException(status_code=400, detail="end date is before start date")
     start_dt = datetime.combine(start, datetime.min.time(), tzinfo=UTC)
     end_dt = datetime.combine(end, datetime.max.time(), tzinfo=UTC)
     return {"rows": list_changes(session, account.id, start_dt, end_dt, bounded_limit(limit))}
@@ -525,6 +533,11 @@ def changes(
 @router.get("/freshness")
 def freshness_route(account: AdAccount = Depends(account_access), session: Session = Depends(get_db)) -> dict:
     return freshness(session, account)
+
+
+@router.get("/ai/system-prompt")
+def system_prompt_route(user: User = Depends(current_user)) -> dict:
+    return {"prompt": load_system_prompt()}
 
 
 @router.post("/ai/query")

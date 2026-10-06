@@ -32,6 +32,18 @@ type CampaignMove = {
   conversion_delta: number;
 };
 
+type StrategyFeed = {
+  comparison?: string;
+  period?: { start?: string; end?: string; days?: number };
+  earlier_half?: { start: string | null; end: string | null };
+  later_half?: { start: string | null; end: string | null };
+  totals?: Record<string, number | null>;
+  half_comparison?: Movement[];
+  campaigns?: CampaignMove[];
+  findings?: string[];
+  weekly?: { week: string; start: string; end: string; cost: number; conversions: number }[];
+};
+
 type Trends = {
   days: number;
   earlier: { start: string | null; end: string | null };
@@ -49,6 +61,7 @@ type Trends = {
   movements: Movement[];
   campaigns: CampaignMove[];
   findings: string[];
+  ai_context?: StrategyFeed;
 };
 
 const METRICS = [
@@ -84,8 +97,104 @@ function arrow(direction: Movement["direction"], percent: number | null) {
   return percent > 0 ? "↑" : "↓";
 }
 
+function FeedOverview({ feed }: { feed: StrategyFeed }) {
+  const [open, setOpen] = useState(false);
+  const period = feed.period ?? {};
+  const totals = feed.totals ?? {};
+  const movements = feed.half_comparison ?? [];
+  const campaigns = (feed.campaigns ?? []).slice(0, 5);
+  const findings = feed.findings ?? [];
+  const weeks = feed.weekly ?? [];
+  const byMetric = new Map(movements.map((item) => [item.metric, item]));
+  const metrics = [
+    ["Spend", "cost", money],
+    ["Conversions", "conversions", num],
+    ["CPA", "cost_per_conversion", money],
+    ["ROAS", "roas", num],
+  ] as const;
+
+  return (
+    <section className="mb-4 rounded-xl border border-line bg-white p-4">
+      <button type="button" className="flex w-full items-center justify-between text-left" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">Data fed to the AI</h2>
+        <span className="text-sm text-neutral-500">{open ? "Hide" : "Show"}</span>
+      </button>
+      {open ? (
+        <div className="mt-4">
+          <p className="mb-3 text-sm text-neutral-600">
+            {feed.comparison ?? "Earlier half versus later half"}. Period {period.start} to {period.end}
+            {period.days != null ? ` · ${period.days} days with data` : ""}.
+            {feed.earlier_half?.start && feed.later_half?.start
+              ? ` Later ${feed.later_half.start}–${feed.later_half.end} vs earlier ${feed.earlier_half.start}–${feed.earlier_half.end}.`
+              : ""}
+          </p>
+          <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {metrics.map(([label, key, format]) => {
+              const move = byMetric.get(key);
+              return (
+                <div key={key}>
+                  <p className="text-xs uppercase tracking-wide text-neutral-500">{label}</p>
+                  <p className="text-lg font-semibold text-neutral-900">{format(totals[key])}</p>
+                  <p className="text-xs text-neutral-600">
+                    {move ? `${pct(move.percent)} later vs earlier half` : "No half comparison"}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div>
+              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Campaign movers</h3>
+              {campaigns.length === 0 ? (
+                <p className="text-sm text-neutral-600">No material campaign moves in this window.</p>
+              ) : (
+                <ul className="space-y-1 text-sm text-neutral-800">
+                  {campaigns.map((item) => (
+                    <li key={item.campaign_id}>
+                      <span className="font-medium">{item.name}</span>
+                      <span className="text-neutral-600">
+                        {" "}
+                        · spend {item.spend_delta >= 0 ? "+" : ""}
+                        {money(item.spend_delta)}, conv {item.conversion_delta >= 0 ? "+" : ""}
+                        {num(item.conversion_delta)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Signals in the JSON</h3>
+              <ul className="space-y-1 text-sm text-neutral-800">
+                <li>{movements.length} half-period metric moves</li>
+                <li>{(feed.campaigns ?? []).length} campaigns in the feed</li>
+                <li>{weeks.length} weekly buckets</li>
+                <li>{findings.length} calculated findings</li>
+              </ul>
+              {findings[0] ? <p className="mt-2 text-sm text-neutral-600">{findings[0]}</p> : null}
+              {weeks[0] && weeks[weeks.length - 1] ? (
+                <p className="mt-2 text-sm text-neutral-600">
+                  Weekly series: {weeks[0].week} ({money(weeks[0].cost)}) through {weeks[weeks.length - 1].week} (
+                  {money(weeks[weeks.length - 1].cost)})
+                </p>
+              ) : null}
+            </div>
+          </div>
+          <details className="mt-4">
+            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-neutral-500">Raw JSON</summary>
+            <pre className="mt-2 max-h-48 overflow-auto rounded-md border border-line bg-paper p-3 text-xs leading-5 text-neutral-800">
+              {JSON.stringify(feed, null, 2)}
+            </pre>
+          </details>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export default function TrendsPage() {
   const [report, setReport] = useState<Trends | null>(null);
+  const [feed, setFeed] = useState<StrategyFeed | null>(null);
   const [error, setError] = useState("");
   const [span, setSpan] = useState<DateSpan>({ ...initialRange, preset: 90 });
   const [metric, setMetric] = useState<(typeof METRICS)[number][0]>("cost_per_conversion");
@@ -123,6 +232,7 @@ export default function TrendsPage() {
   useEffect(() => {
     if (!id || problem) return;
     setReport(null);
+    setFeed(null);
     setError("");
     strategyRequest.current += 1;
     setStrategyAnswer("");
@@ -131,7 +241,10 @@ export default function TrendsPage() {
     setStrategyNotice("");
     setAnsweredSpan("");
     api<Trends>(`/api/trends?account_id=${id}&start_date=${span.start}&end_date=${span.end}`)
-      .then(setReport)
+      .then((payload) => {
+        setReport(payload);
+        setFeed(payload.ai_context ?? null);
+      })
       .catch((reason: Error) => setError(reason.message));
   }, [id, span.start, span.end, problem]);
 
@@ -151,6 +264,7 @@ export default function TrendsPage() {
         start_date: string;
         end_date: string;
         saved_id?: string | null;
+        ai_context?: StrategyFeed;
       }>("/api/ai/strategy", {
         method: "POST",
         body: JSON.stringify({
@@ -165,6 +279,7 @@ export default function TrendsPage() {
       if (payload.saved_id) setFocusId(payload.saved_id);
       setStrategyAnswer(payload.answer);
       setStrategyCouncil(payload.council ?? null);
+      if (payload.ai_context) setFeed(payload.ai_context);
       setAnsweredSpan(`${payload.start_date} to ${payload.end_date}`);
       if (payload.notice) setStrategyNotice(`${payload.notice} Showing the calculated overview.`);
       else if (payload.llm_error === "rate_limit") setStrategyNotice("The council models are out of requests for now. Showing the calculated overview.");
@@ -201,6 +316,7 @@ export default function TrendsPage() {
         </div>
         <DateRangePicker value={span} onChange={setSpan} />
       </div>
+      {feed ? <FeedOverview feed={feed} /> : null}
       {error ? <p className="mb-4 text-sm text-red-700">{error}</p> : null}
       {problem ? <p className="mb-4 text-sm text-red-700">{problem}</p> : null}
 

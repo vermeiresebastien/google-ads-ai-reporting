@@ -1,10 +1,15 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Resolve .env from the repo root regardless of uvicorn cwd.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_ENV_FILE = _REPO_ROOT / ".env"
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=str(_ENV_FILE), env_file_encoding="utf-8", extra="ignore")
 
     database_url: str = "postgresql+psycopg://gads:gads@localhost:5432/gads"
     redis_url: str = "redis://localhost:6379/0"
@@ -52,6 +57,9 @@ class Settings(BaseSettings):
 
     gads_api_base_url: str = "http://localhost:8000"
     gads_api_token: str = ""
+    # Live Google Ads writes require explicit opt-in plus per-action confirm=true.
+    allow_google_mutations: bool = False
+    budget_increase_pct: float = 0.20
 
     def cors_origin_list(self) -> list[str]:
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]

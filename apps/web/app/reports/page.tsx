@@ -6,6 +6,7 @@ import { HIGHLIGHT_CLASS, MarkdownAnswer, type SummaryHighlight } from "@/compon
 import { RangeCalendar } from "@/components/range-calendar";
 import { Panel, Shell } from "@/components/shell";
 import { API_URL, api, token } from "@/lib/api";
+import { money, num, pct } from "@/lib/format";
 import { useAccountId } from "@/lib/use-account";
 
 type SavedReport = {
@@ -29,6 +30,27 @@ const PERIOD_LABELS: Record<string, string> = {
   last_90_vs_prev_90: "Last 90 days",
   month_to_date_vs_prev: "This month",
   quarter_to_date_vs_prev: "This quarter",
+  all_time: "All time",
+};
+
+type Totals = Record<string, number | null>;
+type FeedReport = {
+  date: string;
+  data_freshness?: { last_successful_sync?: string | null; datasets?: Record<string, string | null> };
+  account: Totals;
+  comparison: {
+    current?: Totals;
+    baseline?: Totals;
+    changes: Record<string, { percent: number | null; absolute?: number | null }>;
+    period: Record<string, string>;
+  };
+  top_changes?: { name: string; bucket: string; spend_delta: number; conversion_delta: number; value_delta: number }[];
+  anomalies?: { type: string; name?: string; evidence?: string[] }[];
+  budget_opportunities?: unknown[];
+  wasted_spend?: { name: string; campaign_name?: string; reasons: string[]; metrics: { cost: number } }[];
+  recent_changes?: { change_type?: string; resource_type?: string; user_email?: string; event_timestamp?: string }[];
+  recommended_actions?: { action: string; evidence?: string[] }[];
+  channels?: { channels: { label: string; cost?: number | null; conversions?: number | null }[] };
 };
 
 type Council = {
@@ -36,6 +58,129 @@ type Council = {
   opinions: { model: string; response: string }[];
   rankings: { model: string; average_rank: number }[];
 };
+
+function kindForQuestion(question: string) {
+  const text = question.toLowerCase();
+  if (text.includes("quarter")) return "quarter_to_date_vs_prev";
+  if (text.includes("month")) return "month_to_date_vs_prev";
+  if (text.includes("90") || text.includes("history")) return "last_90_vs_prev_90";
+  if (text.includes("today") || (text.includes("yesterday") && text.includes("change"))) return "today_vs_yesterday";
+  if (text.includes("week") && !text.includes("yesterday")) return "last_7_vs_prev_7";
+  if (text.includes("30")) return "last_30_vs_prev_30";
+  return "yesterday_vs_prev7_avg";
+}
+
+function bucketLabel(bucket: string) {
+  return bucket.replaceAll("_", " ");
+}
+
+function FeedOverview({ report, tools }: { report: FeedReport; tools: string[] }) {
+  const [open, setOpen] = useState(false);
+  const period = report.comparison.period;
+  const kind = period.kind ?? "";
+  const changes = report.comparison.changes ?? {};
+  const sync = report.data_freshness?.last_successful_sync;
+  const metrics = [
+    ["Spend", report.account.cost, changes.cost?.percent, money],
+    ["Conversions", report.account.conversions, changes.conversions?.percent, num],
+    ["CPA", report.account.cost_per_conversion, changes.cost_per_conversion?.percent, money],
+    ["ROAS", report.account.roas, changes.roas?.percent, num],
+  ] as const;
+  const movers = (report.top_changes ?? []).slice(0, 5);
+  const channels = (report.channels?.channels ?? []).filter((item) => (item.cost ?? 0) > 0).slice(0, 6);
+  const anomalies = report.anomalies ?? [];
+  const waste = report.wasted_spend ?? [];
+  const edits = report.recent_changes ?? [];
+  const actions = report.recommended_actions ?? [];
+  const budgets = report.budget_opportunities ?? [];
+
+  return (
+    <section className="rounded-xl border border-line bg-white p-4">
+      <button type="button" className="flex w-full items-center justify-between text-left" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">Data fed to the AI</h2>
+        <span className="text-sm text-neutral-500">{open ? "Hide" : "Show"}</span>
+      </button>
+      {open ? (
+        <div className="mt-4">
+          <p className="mb-3 text-sm text-neutral-600">
+            {PERIOD_LABELS[kind] ?? (kind || "Comparison")}: {period.current_start} to {period.current_end} versus {period.baseline_start}{" "}
+            to {period.baseline_end}. As of {report.date}
+            {sync ? ` · Last sync ${sync.slice(0, 19).replace("T", " ")}` : ""}.
+          </p>
+          <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {metrics.map(([label, value, change, format]) => (
+              <div key={label}>
+                <p className="text-xs uppercase tracking-wide text-neutral-500">{label}</p>
+                <p className="text-lg font-semibold text-neutral-900">{format(value)}</p>
+                <p className="text-xs text-neutral-600">{change == null ? "No prior period" : `${pct(change)} vs baseline`}</p>
+              </div>
+            ))}
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div>
+              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Campaign movers</h3>
+              {movers.length === 0 ? (
+                <p className="text-sm text-neutral-600">No material campaign moves in this window.</p>
+              ) : (
+                <ul className="space-y-1 text-sm text-neutral-800">
+                  {movers.map((item) => (
+                    <li key={`${item.name}-${item.bucket}`}>
+                      <span className="font-medium">{item.name}</span>
+                      <span className="text-neutral-500"> · {bucketLabel(item.bucket)}</span>
+                      <span className="text-neutral-600">
+                        {" "}
+                        · spend {item.spend_delta >= 0 ? "+" : ""}
+                        {money(item.spend_delta)}, conv {item.conversion_delta >= 0 ? "+" : ""}
+                        {num(item.conversion_delta)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">Signals in the JSON</h3>
+              <ul className="space-y-1 text-sm text-neutral-800">
+                <li>{anomalies.length} anomalies</li>
+                <li>{waste.length} wasted-spend candidates</li>
+                <li>{budgets.length} budget opportunities</li>
+                <li>{edits.length} account edits in the period</li>
+                <li>{actions.length} recommended actions</li>
+                {tools.length ? <li>Tools selected for the question: {tools.join(", ")}</li> : null}
+              </ul>
+              {channels.length ? (
+                <p className="mt-2 text-sm text-neutral-600">
+                  Channels by spend:{" "}
+                  {channels.map((item) => `${item.label} ${money(item.cost)}`).join(" · ")}
+                </p>
+              ) : null}
+              {waste[0] ? (
+                <p className="mt-2 text-sm text-neutral-600">
+                  Top waste: {waste[0].name}
+                  {waste[0].campaign_name ? ` in ${waste[0].campaign_name}` : ""} ({money(waste[0].metrics.cost)}
+                  {waste[0].reasons[0] ? ` · ${waste[0].reasons[0]}` : ""})
+                </p>
+              ) : null}
+              {edits[0] ? (
+                <p className="mt-2 text-sm text-neutral-600">
+                  Latest edit: {[edits[0].change_type, edits[0].resource_type].filter(Boolean).join(" ")}
+                  {edits[0].user_email ? ` by ${edits[0].user_email}` : ""}
+                  {edits[0].event_timestamp ? ` · ${String(edits[0].event_timestamp).slice(0, 16).replace("T", " ")}` : ""}
+                </p>
+              ) : null}
+            </div>
+          </div>
+          <details className="mt-4">
+            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-neutral-500">Raw JSON</summary>
+            <pre className="mt-2 max-h-48 overflow-auto rounded-md border border-line bg-paper p-3 text-xs leading-5 text-neutral-800">
+              {JSON.stringify(report, null, 2)}
+            </pre>
+          </details>
+        </div>
+      ) : null}
+    </section>
+  );
+}
 
 function savedForDay(reports: SavedReport[], asOf: string) {
   const daily = reports.filter(
@@ -163,6 +308,9 @@ export default function ReportsPage() {
   const [notice, setNotice] = useState("");
   const [asking, setAsking] = useState(false);
   const [council, setCouncil] = useState<Council | null>(null);
+  const [feed, setFeed] = useState<FeedReport | null>(null);
+  const [feedTools, setFeedTools] = useState<string[]>([]);
+  const [feedError, setFeedError] = useState("");
   const answerRef = useRef<HTMLDivElement>(null);
   const [exportError, setExportError] = useState("");
   const [archiveError, setArchiveError] = useState("");
@@ -209,29 +357,61 @@ export default function ReportsPage() {
       .catch(() => null);
   }
 
+  function loadFeed(accountId: string, ask: string, tools: string[] = []) {
+    const kind = kindForQuestion(ask);
+    return api<FeedReport>(`/api/reports/daily?account_id=${accountId}&kind=${kind}&save=false`)
+      .then((report) => {
+        setFeed(report);
+        setFeedTools(tools);
+        setFeedError("");
+        return report;
+      })
+      .catch((reason: Error) => {
+        setFeedError(reason.message || "Could not load the AI data overview");
+        return null;
+      });
+  }
+
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
     setError("");
     setNotice("");
+    setFeedError("");
+    loadFeed(id, question);
     loadSaved(id).then(async (savedPayload) => {
       if (cancelled) return;
       const existing = savedPayload ? savedForDay(savedPayload.reports, savedPayload.as_of) : undefined;
       if (existing) {
         setAnswer(existing.body);
         setCouncil(null);
-        if (existing.question) setQuestion(existing.question);
+        if (existing.question) {
+          setQuestion(existing.question);
+          loadFeed(id, existing.question);
+        }
         return;
       }
       setAsking(true);
       try {
-        const payload = await api<{ answer: string; council?: Council | null }>("/api/ai/query", {
+        const payload = await api<{
+          answer: string;
+          council?: Council | null;
+          report?: FeedReport;
+          tools?: string[];
+        }>("/api/ai/query", {
           method: "POST",
           body: JSON.stringify({ account_id: id, question }),
         });
         if (cancelled) return;
         setAnswer(payload.answer);
         setCouncil(payload.council ?? null);
+        if (payload.report) {
+          setFeed(payload.report);
+          setFeedTools(payload.tools ?? []);
+          setFeedError("");
+        } else {
+          loadFeed(id, question, payload.tools ?? []);
+        }
         loadSaved(id);
       } catch (reason) {
         if (!cancelled) setError(reason instanceof Error ? reason.message : "Query failed");
@@ -310,6 +490,25 @@ export default function ReportsPage() {
     }
   }
 
+  async function saveBody(reportId: string, body: string) {
+    if (!id) return;
+    setArchiveError("");
+    const updated = await api<{ id: string; title?: string; body?: string }>(`/api/reports/saved/${reportId}?account_id=${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ body }),
+    });
+    if (typeof updated.body !== "string") {
+      throw new Error("Could not save the note. Restart the API and try again.");
+    }
+    setSaved((current) =>
+      current.map((row) =>
+        row.id === reportId
+          ? { ...row, body: updated.body as string, ...(typeof updated.title === "string" ? { title: updated.title } : {}) }
+          : row,
+      ),
+    );
+  }
+
   async function removeSaved(reportId: string) {
     if (!id) return;
     setPendingDeleteId("");
@@ -357,12 +556,26 @@ export default function ReportsPage() {
     setError("");
     setNotice("");
     try {
-      const payload = await api<{ answer: string; llm_error: string | null; notice?: string | null; council?: Council | null }>("/api/ai/query", {
+      const payload = await api<{
+        answer: string;
+        llm_error: string | null;
+        notice?: string | null;
+        council?: Council | null;
+        report?: FeedReport;
+        tools?: string[];
+      }>("/api/ai/query", {
         method: "POST",
         body: JSON.stringify({ account_id: id, question }),
       });
       setAnswer(payload.answer);
       setCouncil(payload.council ?? null);
+      if (payload.report) {
+        setFeed(payload.report);
+        setFeedTools(payload.tools ?? []);
+        setFeedError("");
+      } else {
+        await loadFeed(id, question, payload.tools ?? []);
+      }
       if (payload.notice) setNotice(`${payload.notice} Showing the calculated report.`);
       else if (payload.llm_error === "rate_limit") setNotice("The council models are out of requests for now. Showing the calculated report.");
       else if (payload.llm_error) setNotice("The model did not answer. Showing the calculated report.");
@@ -386,6 +599,14 @@ export default function ReportsPage() {
     <div className="print:hidden">
     <Shell>
       <h1 className="mb-4 text-2xl font-semibold">Reports</h1>
+      {feedError ? <p className="mb-3 text-sm text-red-700">{feedError}</p> : null}
+      {feed ? (
+        <div className="mb-4">
+          <FeedOverview report={feed} tools={feedTools} />
+        </div>
+      ) : !feedError ? (
+        <p className="mb-4 text-sm text-neutral-600">Loading the numbers the AI will use…</p>
+      ) : null}
       <form onSubmit={ask} className="mb-4 flex flex-col gap-2 sm:flex-row">
         <input className="flex-1 rounded-md border border-line px-3 py-2 text-sm" value={question} onChange={(event) => setQuestion(event.target.value)} />
         <button className="rounded-md bg-pine px-3 py-2 text-sm text-white disabled:opacity-60" type="submit" disabled={asking || !id}>
@@ -573,8 +794,10 @@ export default function ReportsPage() {
                             <AnnotatedSummary
                               text={selected.body}
                               highlights={selected.highlights ?? []}
+                              noteKey={selected.id}
                               onAdd={(quote, color, note) => addHighlight(selected.id, quote, color, note)}
                               onRemove={(highlightId) => removeHighlight(selected.id, highlightId)}
+                              onSave={(body) => saveBody(selected.id, body)}
                             />
                           ) : highlightView === "note" ? (
                             <HighlightBits

@@ -262,6 +262,19 @@ export function SavedNotes({
     }
   }
 
+  async function saveBody(reportId: string, body: string) {
+    if (!accountId) return;
+    setArchiveError("");
+    const updated = await api<{ id: string; title?: string; body?: string }>(`/api/reports/saved/${reportId}?account_id=${accountId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ body }),
+    });
+    if (typeof updated.body !== "string") {
+      throw new Error("Could not save the note. Restart the API and try again.");
+    }
+    onReload();
+  }
+
   async function removeSaved(reportId: string) {
     if (!accountId) return;
     setPendingDeleteId("");
@@ -479,8 +492,10 @@ export function SavedNotes({
                             <AnnotatedSummary
                               text={selected.body}
                               highlights={selected.highlights ?? []}
+                              noteKey={selected.id}
                               onAdd={(quote, color, note) => addHighlight(selected.id, quote, color, note)}
                               onRemove={(highlightId) => removeHighlight(selected.id, highlightId)}
+                              onSave={(body) => saveBody(selected.id, body)}
                             />
                           ) : highlightView === "note" ? (
                             <HighlightBits

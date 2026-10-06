@@ -9,7 +9,7 @@ from gads.logging import configure_logging
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from gads_api.routers import analytics, auth, google, platforms
+from gads_api.routers import actions, analytics, auth, google, platforms
 
 
 def create_app() -> FastAPI:
@@ -32,6 +32,7 @@ def create_app() -> FastAPI:
     app.include_router(google.router)
     app.include_router(platforms.router)
     app.include_router(analytics.router)
+    app.include_router(actions.router)
 
     @app.get("/", include_in_schema=False)
     def root() -> RedirectResponse:
@@ -40,7 +41,10 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health(session: Session = Depends(get_db)) -> dict:
         session.execute(text("SELECT 1"))
-        return {"status": "ok"}
+        return {
+            "status": "ok",
+            "allow_google_mutations": get_settings().allow_google_mutations,
+        }
 
     return app
 

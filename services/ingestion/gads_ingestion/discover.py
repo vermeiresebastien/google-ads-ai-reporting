@@ -4,16 +4,33 @@ from gads_ingestion.google_ads.queries import customer_clients_query, customer_q
 from gads_ingestion.mapping import text_id
 
 
+class DiscoveryError(Exception):
+    pass
+
+
 def discover_accounts(client) -> list[dict]:
     found: dict[str, dict] = {}
-    for resource in client.list_accessible_customers():
+    failures: list[str] = []
+    try:
+        resources = client.list_accessible_customers()
+    except Exception as exc:
+        raise DiscoveryError(str(exc)) from exc
+    for resource in resources:
         customer_id = resource.split("/")[-1]
-        rows = client.search(customer_id, customer_query())
+        try:
+            rows = client.search(customer_id, customer_query())
+        except Exception as exc:
+            failures.append(str(exc))
+            continue
         if not rows:
             continue
         customer = rows[0].get("customer") or {}
         if customer.get("manager"):
-            children = client.search(customer_id, customer_clients_query())
+            try:
+                children = client.search(customer_id, customer_clients_query())
+            except Exception as exc:
+                failures.append(str(exc))
+                continue
             for child_row in children:
                 child = child_row.get("customer_client") or {}
                 if child.get("manager"):
@@ -38,4 +55,6 @@ def discover_accounts(client) -> list[dict]:
                 "timezone": customer.get("time_zone") or "",
                 "status": customer.get("status") or "ENABLED",
             }
+    if not found and failures:
+        raise DiscoveryError(failures[0])
     return list(found.values())

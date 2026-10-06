@@ -302,34 +302,49 @@ def top_changes(drivers: dict, limit: int = 5) -> list[dict]:
 
 def recommendations(anomalies: list[dict], waste: list[dict], budgets: list[dict], changes: list[dict]) -> list[dict]:
     actions = []
-    for item in waste[:3]:
+    for item in waste[:2]:
+        metrics = item["metrics"]
         actions.append(
             {
-                "action": f"Review {item['kind']} '{item['name']}' before adding it as a negative or pausing it.",
+                "action": (
+                    f"Add “{item['name']}” as a negative keyword. "
+                    f"It spent {metrics['cost']:.2f} across {int(metrics['clicks'])} clicks "
+                    f"and produced {metrics['conversions']:.2f} conversions."
+                ),
                 "evidence": item["reasons"],
                 "confidence": "medium",
             }
         )
-    for item in budgets[:3]:
+    for item in budgets:
+        if len(actions) >= 3:
+            break
+        lost = item["budget_lost_impression_share"]
+        metrics = item["metrics"]
+        cpa = metrics.get("cost_per_conversion")
+        cpa_text = f" CPA is {cpa:.2f}." if cpa else ""
         actions.append(
             {
-                "action": f"Review a budget increase for {item['name']} only if the conversion action is still the one you want to buy.",
+                "action": (
+                    f"Move budget toward {item['name']}. "
+                    f"The budget is hiding {lost:.0%} of eligible impressions while efficiency stays near the account.{cpa_text}"
+                ),
                 "evidence": item["evidence"],
                 "confidence": item["confidence"],
             }
         )
-    if anomalies and not actions:
+    if len(actions) < 3 and anomalies:
+        evidence = anomalies[0]["evidence"]
         actions.append(
             {
-                "action": "Inspect the campaigns driving the account-level change before editing bids or budgets.",
-                "evidence": anomalies[0]["evidence"],
+                "action": f"Check the campaigns behind the account move before editing bids. {evidence[0]}",
+                "evidence": evidence,
                 "confidence": "medium",
             }
         )
-    if changes and not waste and not budgets and not anomalies:
+    if changes and not actions:
         actions.append(
             {
-                "action": "No bid or budget change is justified from the configured thresholds. Recent edits are listed for context.",
+                "action": "Leave bids and budgets as they are. The compared change is inside the configured thresholds.",
                 "evidence": ["Configured anomaly thresholds were not crossed"],
                 "confidence": "low",
             }
@@ -337,12 +352,12 @@ def recommendations(anomalies: list[dict], waste: list[dict], budgets: list[dict
     if not actions:
         actions.append(
             {
-                "action": "No action is recommended. Compared changes are inside the configured thresholds.",
+                "action": "Leave the account as it is. Spend, efficiency, and query waste are inside the configured thresholds.",
                 "evidence": ["No anomaly, waste candidate, or budget opportunity met the configured thresholds"],
                 "confidence": "high",
             }
         )
-    return actions
+    return actions[:3]
 
 
 def evidence_claims(comparison: dict, drivers: dict) -> list[dict]:

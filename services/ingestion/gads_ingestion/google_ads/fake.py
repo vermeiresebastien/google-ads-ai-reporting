@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 class FakeGoogleAdsClient:
-    """In-memory Google Ads client used by tests and GOOGLE_ADS_USE_FAKE."""
+    """In-memory Google Ads client used by tests."""
 
     def __init__(self, fixtures: dict | None = None):
         self.fixtures = fixtures or default_fixtures()
@@ -49,7 +49,8 @@ def default_fixtures() -> dict:
             "status": "ENABLED",
             "advertising_channel_type": "SEARCH",
             "advertising_channel_sub_type": "UNSPECIFIED",
-            "start_date": "2026-01-01",
+            "start_date_time": "2026-01-01 00:00:00",
+            "end_date_time": "2037-12-30 23:59:59",
             "resource_name": "customers/1234567890/campaigns/111",
         },
         "campaign_budget": {"amount_micros": "50000000"},

@@ -55,7 +55,7 @@ def build_server():
 
     @mcp.tool()
     def compare_periods(account_id: str, kind: str = "last_7_vs_prev_7", as_of: str | None = None) -> dict:
-        """Compare equal periods. kind is yesterday_vs_prev7_avg, last_7_vs_prev_7, last_14_vs_prev_14, or last_30_vs_prev_30."""
+        """Compare periods. kind is yesterday_vs_prev7_avg, last_7_vs_prev_7, last_14_vs_prev_14, last_30_vs_prev_30, last_90_vs_prev_90, month_to_date_vs_prev, or quarter_to_date_vs_prev."""
         return _get("/api/compare", {"account_id": account_id, "kind": kind, "as_of": as_of})
 
     @mcp.tool()

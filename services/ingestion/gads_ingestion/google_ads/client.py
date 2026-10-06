@@ -42,19 +42,10 @@ class GoogleAdsApiClient:
 
 def build_client(account: AdAccount):
     settings = get_settings()
-    if settings.google_ads_use_fake:
-        from gads_ingestion.google_ads.fake import FakeGoogleAdsClient
-
-        return FakeGoogleAdsClient()
     refresh_token = decrypt_secret(account.connection.refresh_token_encrypted)
     login_customer_id = account.manager_customer_id or settings.google_ads_login_customer_id or None
     return GoogleAdsApiClient(refresh_token=refresh_token, login_customer_id=login_customer_id)
 
 
 def build_client_for_refresh_token(refresh_token: str, login_customer_id: str | None = None):
-    settings = get_settings()
-    if settings.google_ads_use_fake:
-        from gads_ingestion.google_ads.fake import FakeGoogleAdsClient
-
-        return FakeGoogleAdsClient()
     return GoogleAdsApiClient(refresh_token=refresh_token, login_customer_id=login_customer_id)

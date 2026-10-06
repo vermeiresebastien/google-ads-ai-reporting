@@ -185,8 +185,8 @@ def sync_campaigns(session: Session, account: AdAccount, client) -> dict:
                 status=campaign.get("status") or "",
                 advertising_channel_type=campaign.get("advertising_channel_type") or "",
                 campaign_type=campaign.get("advertising_channel_sub_type") or "",
-                start_date=parse_date(campaign.get("start_date")),
-                end_date=parse_date(campaign.get("end_date")),
+                start_date=parse_date(campaign.get("start_date_time") or campaign.get("start_date")),
+                end_date=parse_date(campaign.get("end_date_time") or campaign.get("end_date")),
                 daily_budget=None if budget_micros is None else num(budget_micros) / 1_000_000,
             )
             _store_raw(session, account.id, "campaigns", campaign.get("resource_name") or f"campaign/{campaign.get('id')}", today, raw)

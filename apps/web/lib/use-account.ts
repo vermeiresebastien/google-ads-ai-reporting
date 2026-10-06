@@ -8,17 +8,13 @@ export function useAccountId() {
 
   useEffect(() => {
     const existing = accountId();
-    if (existing) {
-      setId(existing);
-      return;
-    }
     api<{ accounts: { id: string }[] }>("/api/accounts")
       .then((payload) => {
-        const next = payload.accounts[0]?.id ?? "";
-        if (next) {
-          setAccountId(next);
-          setId(next);
-        }
+        const known = payload.accounts.some((account) => account.id === existing);
+        const next = known ? existing : payload.accounts[0]?.id ?? "";
+        if (next) setAccountId(next);
+        else localStorage.removeItem("gads_account_id");
+        setId(next);
       })
       .catch(() => undefined);
   }, []);

@@ -9,7 +9,6 @@ from gads.logging import configure_logging
 
 from gads_ingestion.jobs import enqueue_account_sync, run_account_sync
 from gads_ingestion.reconcile import reconcile_account
-from gads_ingestion.seed import seed_demo
 
 
 def main() -> None:
@@ -19,20 +18,15 @@ def main() -> None:
 
     sync = sub.add_parser("sync")
     sync.add_argument("--account", required=True)
-    sync.add_argument("--mode", choices=["initial", "daily", "weekly"], default="daily")
+    sync.add_argument("--mode", choices=["initial", "daily", "weekly", "history"], default="daily")
     sync.add_argument("--start")
     sync.add_argument("--end")
     sync.add_argument("--enqueue", action="store_true")
 
-    sub.add_parser("seed-demo")
     reconcile = sub.add_parser("reconcile")
     reconcile.add_argument("--account", required=True)
 
     args = parser.parse_args()
-    if args.command == "seed-demo":
-        with session_scope() as session:
-            print(json.dumps(seed_demo(session), indent=2))
-        return
     if args.command == "reconcile":
         with session_scope() as session:
             print(json.dumps(reconcile_account(session, args.account), indent=2))

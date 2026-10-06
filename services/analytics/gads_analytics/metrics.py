@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -81,8 +82,17 @@ def assert_equal_length(start: date, end: date, previous_start: date, previous_e
         raise ValueError("Periods must be the same length unless a named comparison normalizes them")
 
 
+def _shift_months(day: date, months: int) -> date:
+    month_index = day.month - 1 + months
+    year = day.year + month_index // 12
+    month = month_index % 12 + 1
+    return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
+
+
 def window_for(kind: str, as_of: date) -> tuple[tuple[date, date], tuple[date, date], str]:
     """Return current bounds, previous bounds, and normalization mode."""
+    if kind == "today_vs_yesterday":
+        return (as_of, as_of), (as_of - timedelta(days=1), as_of - timedelta(days=1)), "totals"
     if kind == "yesterday_vs_prev7_avg":
         return (as_of, as_of), (as_of - timedelta(days=7), as_of - timedelta(days=1)), "daily_average"
     if kind == "yesterday_vs_same_weekday":
@@ -94,6 +104,18 @@ def window_for(kind: str, as_of: date) -> tuple[tuple[date, date], tuple[date, d
         return (as_of - timedelta(days=13), as_of), (as_of - timedelta(days=27), as_of - timedelta(days=14)), "totals"
     if kind == "last_30_vs_prev_30":
         return (as_of - timedelta(days=29), as_of), (as_of - timedelta(days=59), as_of - timedelta(days=30)), "totals"
+    if kind == "last_90_vs_prev_90":
+        return (as_of - timedelta(days=89), as_of), (as_of - timedelta(days=179), as_of - timedelta(days=90)), "totals"
+    if kind == "month_to_date_vs_prev":
+        previous = _shift_months(as_of, -1)
+        return (as_of.replace(day=1), as_of), (previous.replace(day=1), previous), "totals"
+    if kind == "quarter_to_date_vs_prev":
+        start_month = ((as_of.month - 1) // 3) * 3 + 1
+        current_start = date(as_of.year, start_month, 1)
+        previous = _shift_months(as_of, -3)
+        previous_start_month = ((previous.month - 1) // 3) * 3 + 1
+        previous_start = date(previous.year, previous_start_month, 1)
+        return (current_start, as_of), (previous_start, previous), "totals"
     raise ValueError(f"Unknown comparison kind: {kind}")
 
 

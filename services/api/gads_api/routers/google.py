@@ -12,7 +12,14 @@ from gads.models import AccountAnalyticsSettings, AdAccount, GoogleConnection, U
 from gads.security import create_oauth_state, decode_oauth_state, encrypt_secret
 from gads_ingestion.discover import discover_accounts
 from gads_ingestion.google_ads.client import build_client_for_refresh_token
-from gads_ingestion.jobs import enqueue_account_sync
+from gads_ingestion.jobs import (
+    begin_sync_progress,
+    date_window,
+    enqueue_account_sync,
+    plan_sync_steps,
+    run_account_sync,
+    sync_progress,
+)
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -33,6 +40,17 @@ class SyncRequest(BaseModel):
     mode: str = "initial"
     start_date: str | None = None
     end_date: str | None = None
+
+
+def _connect_error(exc: Exception) -> str:
+    text = str(exc).lower()
+    if "has not been used in project" in text or "it is disabled" in text or "service_disabled" in text:
+        return "api_disabled"
+    if "only approved for use with test accounts" in text:
+        return "test_access"
+    if "not yet enabled" in text or "has been deactivated" in text:
+        return "account_inactive"
+    return "discovery"
 
 
 def _member(session: Session, user_id: str, workspace_id: str) -> WorkspaceMember:
@@ -87,12 +105,12 @@ def oauth_callback(code: str, state: str, session: Session = Depends(get_db)):
         timeout=30,
     )
     if token_response.status_code >= 400:
-        return RedirectResponse(f"{settings.frontend_url}/accounts?error=oauth")
+        return RedirectResponse(f"{settings.frontend_url}/configure?error=oauth")
     token_body = token_response.json()
     refresh_token = token_body.get("refresh_token")
     access_token = token_body.get("access_token")
     if not refresh_token:
-        return RedirectResponse(f"{settings.frontend_url}/accounts?error=missing_refresh_token")
+        return RedirectResponse(f"{settings.frontend_url}/configure?error=missing_refresh_token")
     email = ""
     if access_token:
         profile = httpx.get(GOOGLE_USERINFO, headers={"Authorization": f"Bearer {access_token}"}, timeout=30)
@@ -127,10 +145,11 @@ def oauth_callback(code: str, state: str, session: Session = Depends(get_db)):
     try:
         client = build_client_for_refresh_token(refresh_token, settings.google_ads_login_customer_id or None)
         discovered = discover_accounts(client)
-    except Exception:
+    except Exception as exc:
         connection.status = "error"
         session.commit()
-        return RedirectResponse(f"{settings.frontend_url}/accounts?error=discovery")
+        code = _connect_error(exc)
+        return RedirectResponse(f"{settings.frontend_url}/configure?error={code}")
     for item in discovered:
         account = session.scalar(
             select(AdAccount).where(
@@ -150,7 +169,7 @@ def oauth_callback(code: str, state: str, session: Session = Depends(get_db)):
         account.timezone = item["timezone"]
         account.status = item["status"]
     session.commit()
-    return RedirectResponse(f"{settings.frontend_url}/accounts?connected=1")
+    return RedirectResponse(f"{settings.frontend_url}/configure?connected=1")
 
 
 @router.get("/accounts")
@@ -186,8 +205,8 @@ def sync_account(
     session: Session = Depends(get_db),
 ) -> dict:
     account = authorized_account(account_id, user, session)
-    if body.mode not in {"initial", "daily", "weekly"} and not (body.start_date and body.end_date):
-        raise HTTPException(status_code=400, detail="mode must be initial, daily, or weekly")
+    if body.mode not in {"initial", "daily", "weekly", "history"} and not (body.start_date and body.end_date):
+        raise HTTPException(status_code=400, detail="mode must be initial, daily, weekly, or history")
     start = None
     end = None
     if body.start_date and body.end_date:
@@ -197,9 +216,27 @@ def sync_account(
         end = date.fromisoformat(body.end_date)
     try:
         jobs = enqueue_account_sync(account.id, body.mode, start, end)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Redis is unavailable. Start Redis or run `python -m gads_ingestion.cli sync` for this account.",
-        ) from exc
-    return {"account_id": account.id, "jobs": jobs}
+        return {"account_id": account.id, "jobs": jobs, "runner": "redis"}
+    except Exception:
+        import threading
+
+        window_start, window_end = (start, end) if start and end else date_window(body.mode)
+        steps = plan_sync_steps(window_start, window_end)
+        begin_sync_progress(account.id, steps)
+        threading.Thread(
+            target=run_account_sync,
+            args=(account.id, body.mode, window_start, window_end),
+            daemon=True,
+            name=f"gads-sync-{account.id}",
+        ).start()
+        return {"account_id": account.id, "jobs": [], "runner": "local", "total": len(steps)}
+
+
+@router.get("/accounts/{account_id}/sync/status")
+def account_sync_status(
+    account_id: str,
+    user: User = Depends(current_user),
+    session: Session = Depends(get_db),
+) -> dict:
+    authorized_account(account_id, user, session)
+    return sync_progress(account_id)

@@ -173,6 +173,92 @@ def _weighted_lost_is(session: Session, account_id: str, start: date, end: date)
     return {key: (value[0] / value[1] if value[1] else None) for key, value in weighted.items()}
 
 
+CHANNEL_LABELS = {
+    "SEARCH": "Search",
+    "PERFORMANCE_MAX": "Performance Max",
+    "DISPLAY": "Display",
+    "VIDEO": "YouTube",
+    "DEMAND_GEN": "Demand Gen",
+    "SHOPPING": "Shopping",
+    "MULTI_CHANNEL": "Multi-channel",
+}
+
+
+def _campaigns_by_id(session: Session, account_id: str) -> dict[str, Campaign]:
+    return {row.id: row for row in session.scalars(select(Campaign).where(Campaign.account_id == account_id))}
+
+
+def _weighted_share(total: float, weight: float) -> float | None:
+    if weight <= 0:
+        return None
+    return total / weight
+
+
+def channel_breakdown(session: Session, account_id: str, rows: list[CampaignDaily]) -> dict:
+    campaigns = _campaigns_by_id(session, account_id)
+    totals: dict[str, Totals] = defaultdict(Totals)
+    shares: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    brand = Totals()
+    other = Totals()
+    for row in rows:
+        campaign = campaigns.get(row.campaign_id)
+        channel = (campaign.advertising_channel_type if campaign else "") or "UNKNOWN"
+        piece = _totals_from_row(row)
+        totals[channel] = totals[channel].add(piece)
+        name = (campaign.name if campaign else "").lower()
+        labeled_other = "non-brand" in name or "non brand" in name or "nonbrand" in name
+        if "brand" in name and not labeled_other:
+            brand = brand.add(piece)
+        else:
+            other = other.add(piece)
+        weight = float(row.impressions or 0)
+        if weight <= 0:
+            continue
+        if row.search_impression_share is not None:
+            shares[channel][0] += float(row.search_impression_share) * weight
+            shares[channel][1] += weight
+        if row.search_budget_lost_impression_share is not None:
+            shares[channel][2] += float(row.search_budget_lost_impression_share) * weight
+            shares[channel][3] += weight
+        if row.search_rank_lost_impression_share is not None:
+            shares[channel][4] += float(row.search_rank_lost_impression_share) * weight
+            shares[channel][5] += weight
+    channels = []
+    for channel, piece in totals.items():
+        payload = piece.as_dict()
+        payload.update(
+            {
+                "channel": channel,
+                "label": CHANNEL_LABELS.get(channel, channel.replace("_", " ").title()),
+                "search_impression_share": _weighted_share(shares[channel][0], shares[channel][1]),
+                "search_budget_lost_impression_share": _weighted_share(shares[channel][2], shares[channel][3]),
+                "search_rank_lost_impression_share": _weighted_share(shares[channel][4], shares[channel][5]),
+            }
+        )
+        channels.append(payload)
+    channels.sort(key=lambda item: item["cost"], reverse=True)
+    return {"channels": channels, "brand": brand.as_dict(), "other": other.as_dict()}
+
+
+def daily_series(rows: list[CampaignDaily]) -> list[dict]:
+    grouped: dict[date, Totals] = defaultdict(Totals)
+    for row in rows:
+        grouped[row.date] = grouped[row.date].add(_totals_from_row(row))
+    points = []
+    for day, piece in sorted(grouped.items()):
+        derived = piece.as_dict()
+        points.append(
+            {
+                "date": day.isoformat(),
+                "cost": piece.cost,
+                "conversions": piece.conversions,
+                "cpa": derived["cost_per_conversion"],
+                "cpc": derived["average_cpc"],
+            }
+        )
+    return points
+
+
 def campaign_performance(session: Session, account_id: str, start: date, end: date, limit: int, offset: int) -> dict:
     names = _campaign_names(session, account_id)
     grouped = _by_campaign(_rows_between(session, account_id, start, end))
@@ -371,6 +457,15 @@ def build_report(session: Session, account: AdAccount, kind: str, as_of: date | 
     end_dt = datetime.combine(current_bounds[1], datetime.max.time(), tzinfo=UTC)
     changes = list_changes(session, account.id, start_dt, end_dt, limit=20)
     actions = recommendations(anomalies, waste, budgets, changes)
+    chart_end = current_bounds[1]
+    chart_start = chart_end - timedelta(days=89)
+    chart_changes = list_changes(
+        session,
+        account.id,
+        datetime.combine(chart_start, datetime.min.time(), tzinfo=UTC),
+        datetime.combine(chart_end, datetime.max.time(), tzinfo=UTC),
+        limit=80,
+    )
     return {
         "date": as_of.isoformat(),
         "data_freshness": freshness(session, account),
@@ -384,7 +479,23 @@ def build_report(session: Session, account: AdAccount, kind: str, as_of: date | 
         "campaign_drivers": driver_payload,
         "evidence": evidence_claims(public_comparison, driver_payload),
         "recommended_actions": actions,
+        "channels": channel_breakdown(session, account.id, compared["current_rows"]),
+        "series": daily_series(_rows_between(session, account.id, chart_start, chart_end)),
+        "change_marks": _change_marks(chart_changes),
     }
+
+
+def _change_marks(changes: list[dict]) -> list[dict]:
+    marks = []
+    for change in changes:
+        stamp = str(change.get("event_timestamp") or "")
+        parts = [change.get("change_type"), change.get("resource_type"), change.get("field_changed") or change.get("resource_changed_name")]
+        label = " ".join(str(part) for part in parts if part)
+        who = change.get("user_email") or ""
+        if who:
+            label = f"{label} by {who}"
+        marks.append({"date": stamp[:10], "label": label[:180] or "Account edit"})
+    return marks
 
 
 def account_summary(session: Session, account: AdAccount, start: date, end: date) -> dict:

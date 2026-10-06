@@ -375,6 +375,38 @@ class SyncRun(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class SavedReport(Base):
+    __tablename__ = "saved_reports"
+    __table_args__ = (UniqueConstraint("account_id", "report_date", "kind", name="uq_saved_report"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("ad_accounts.id", ondelete="CASCADE"), index=True)
+    report_date: Mapped[date] = mapped_column(Date, index=True)
+    kind: Mapped[str] = mapped_column(String(64))
+    period_start: Mapped[date | None] = mapped_column(Date, nullable=True)
+    period_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    question: Mapped[str] = mapped_column(Text, default="")
+    title: Mapped[str] = mapped_column(String(200), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    highlights: Mapped[list["SavedReportHighlight"]] = relationship(
+        back_populates="report", cascade="all, delete-orphan"
+    )
+
+
+class SavedReportHighlight(Base):
+    __tablename__ = "saved_report_highlights"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    saved_report_id: Mapped[str] = mapped_column(ForeignKey("saved_reports.id", ondelete="CASCADE"), index=True)
+    quote: Mapped[str] = mapped_column(Text)
+    color: Mapped[str] = mapped_column(String(16))
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    report: Mapped[SavedReport] = relationship(back_populates="highlights")
+
+
 class AccountAnalyticsSettings(Base):
     __tablename__ = "account_analytics_settings"
 
@@ -390,4 +422,15 @@ class AccountAnalyticsSettings(Base):
     budget_lost_is_min: Mapped[Decimal] = mapped_column(Numeric(18, 6), default=Decimal("0.15"))
     min_clicks: Mapped[int] = mapped_column(default=10)
     min_spend_for_anomaly: Mapped[Decimal] = mapped_column(Numeric(18, 6), default=20)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class SettingsPreset(Base):
+    __tablename__ = "settings_presets"
+    __table_args__ = (UniqueConstraint("account_id", "name"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("ad_accounts.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    values: Mapped[dict] = mapped_column(JSON)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

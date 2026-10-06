@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from gads.config import get_settings
 from gads.db import get_db
 from gads.logging import configure_logging
@@ -25,10 +26,15 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Content-Disposition"],
     )
     app.include_router(auth.router)
     app.include_router(google.router)
     app.include_router(analytics.router)
+
+    @app.get("/", include_in_schema=False)
+    def root() -> RedirectResponse:
+        return RedirectResponse(settings.frontend_url)
 
     @app.get("/health")
     def health(session: Session = Depends(get_db)) -> dict:

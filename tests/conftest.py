@@ -6,8 +6,6 @@ from cryptography.fernet import Fernet
 os.environ["TOKEN_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
 os.environ["JWT_SECRET"] = "test-secret"
 os.environ["DATABASE_URL"] = "sqlite+pysqlite:///:memory:"
-os.environ["GOOGLE_ADS_USE_FAKE"] = "true"
-os.environ["ENABLE_DEMO_SEED"] = "true"
 os.environ["SENTRY_DSN"] = ""
 
 from gads.config import get_settings

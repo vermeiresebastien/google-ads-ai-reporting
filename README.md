@@ -45,7 +45,6 @@ The API and worker can run in Docker too (`docker compose up --build`). On Windo
 ### API, worker, frontend
 
 ```powershell
-$env:ENABLE_DEMO_SEED = "true"
 uvicorn gads_api.main:app --reload
 ```
 
@@ -55,13 +54,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000/login, choose **Load local demo data**, then sign in with `demo@example.com` / `demo-password-123`.
-
-Direct demo seed without the UI:
-
-```powershell
-python -m gads_ingestion.cli seed-demo
-```
+Open http://localhost:3000/login and create a workspace. Reporting starts after you connect a Google Ads account.
 
 ### Google Ads connection
 

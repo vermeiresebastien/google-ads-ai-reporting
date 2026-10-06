@@ -3,16 +3,16 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Term } from "@/components/term";
 import { accountId, api, setAccountId, token } from "@/lib/api";
 
 const LINKS = [
   ["/dashboard", "Dashboard"],
-  ["/accounts", "Accounts"],
   ["/campaigns", "Campaigns"],
   ["/search-terms", "Search terms"],
   ["/changes", "Changes"],
   ["/reports", "Reports"],
-  ["/settings", "Settings"],
+  ["/trends", "Trends"],
 ];
 
 type Account = { id: string; account_name: string; customer_id: string };
@@ -36,6 +36,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
         if (next) {
           setAccountId(next);
           setSelected(next);
+        } else {
+          localStorage.removeItem("gads_account_id");
+          setSelected("");
         }
       })
       .catch(() => undefined);
@@ -43,7 +46,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-line bg-white">
+      <header className="sticky top-0 z-30 border-b border-line bg-white">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-4 px-4 py-4">
           <Link href="/dashboard" className="text-lg font-semibold tracking-tight">
             Ads analyst
@@ -74,10 +77,22 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 </option>
               ))}
             </select>
+            <Link
+              href="/configure"
+              aria-label="Configure"
+              title="Configure"
+              className={`rounded-md p-1 ${pathname === "/configure" ? "text-pine" : "text-neutral-600"}`}
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.4 13a7.7 7.7 0 0 0 .1-2l2-1.2-2-3.4-2.3.7a7.8 7.8 0 0 0-1.7-1L15 3.5h-4l-.5 2.6a7.8 7.8 0 0 0-1.7 1L6.5 6.4l-2 3.4L6.5 11a7.7 7.7 0 0 0 .1 2l-2 1.2 2 3.4 2.3-.7a7.8 7.8 0 0 0 1.7 1l.5 2.6h4l.5-2.6a7.8 7.8 0 0 0 1.7-1l2.3.7 2-3.4-2-1.2Z" />
+              </svg>
+            </Link>
             <button
               className="text-sm text-neutral-600"
               onClick={() => {
                 localStorage.removeItem("gads_token");
+                localStorage.removeItem("gads_account_id");
                 router.push("/login");
               }}
             >
@@ -94,7 +109,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 export function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="rounded-xl border border-line bg-white p-4">
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">{title}</h2>
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500"><Term>{title}</Term></h2>
       {children}
     </section>
   );

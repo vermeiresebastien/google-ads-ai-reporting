@@ -18,32 +18,32 @@ from gads.models import (
 )
 from gads.security import encrypt_secret, hash_password
 from gads_analytics.metrics import Totals
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-DEMO_EMAIL = "demo@example.com"
-DEMO_PASSWORD = "demo-password-123"
+FIXTURE_EMAIL = "analyst@example.com"
+FIXTURE_PASSWORD = "password123"
 
 
 def _daily(cost: float, clicks: int, impressions: int, conversions: float, value: float) -> Totals:
     return Totals(impressions=impressions, clicks=clicks, cost=cost, conversions=conversions, conversion_value=value)
 
 
-def seed_demo(session: Session, as_of: date | None = None) -> dict:
+def seed_report_account(session: Session, as_of: date | None = None) -> dict:
     as_of = as_of or (datetime.now(UTC).date() - timedelta(days=1))
-    user = session.scalar(select(User).where(User.email == DEMO_EMAIL))
+    user = session.scalar(select(User).where(User.email == FIXTURE_EMAIL))
     if user is None:
-        user = User(email=DEMO_EMAIL, password_hash=hash_password(DEMO_PASSWORD))
+        user = User(email=FIXTURE_EMAIL, password_hash=hash_password(FIXTURE_PASSWORD))
         session.add(user)
         session.flush()
-        workspace = Workspace(name="Demo workspace")
+        workspace = Workspace(name="Workspace")
         session.add(workspace)
         session.flush()
         session.add(WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role="owner"))
         connection = GoogleConnection(
             workspace_id=workspace.id,
-            google_email=DEMO_EMAIL,
-            refresh_token_encrypted=encrypt_secret("fake-refresh-token"),
+            google_email=FIXTURE_EMAIL,
+            refresh_token_encrypted=encrypt_secret("refresh-token"),
             status="active",
         )
         session.add(connection)
@@ -52,7 +52,7 @@ def seed_demo(session: Session, as_of: date | None = None) -> dict:
             workspace_id=workspace.id,
             connection_id=connection.id,
             customer_id="1234567890",
-            account_name="Demo Google Ads",
+            account_name="Account",
             currency_code="EUR",
             timezone="Europe/Brussels",
             status="ENABLED",
@@ -66,11 +66,8 @@ def seed_demo(session: Session, as_of: date | None = None) -> dict:
         workspace = session.get(Workspace, membership.workspace_id)
         account = session.scalar(select(AdAccount).where(AdAccount.workspace_id == workspace.id))
 
-    session.query(CampaignDaily).filter(CampaignDaily.account_id == account.id).delete()
-    session.query(CampaignBudgetDaily).filter(CampaignBudgetDaily.account_id == account.id).delete()
-    session.query(SearchTermDaily).filter(SearchTermDaily.account_id == account.id).delete()
-    session.query(ChangeEvent).filter(ChangeEvent.account_id == account.id).delete()
-    session.query(Campaign).filter(Campaign.account_id == account.id).delete()
+    for model in (CampaignDaily, CampaignBudgetDaily, SearchTermDaily, ChangeEvent, Campaign):
+        session.execute(delete(model).where(model.account_id == account.id))
     session.flush()
 
     specs = {
@@ -169,7 +166,7 @@ def seed_demo(session: Session, as_of: date | None = None) -> dict:
     session.add(
         ChangeEvent(
             account_id=account.id,
-            resource_name=f"customers/{account.customer_id}/changeEvents/demo",
+            resource_name=f"customers/{account.customer_id}/changeEvents/budget",
             event_timestamp=datetime.combine(as_of, datetime.min.time(), tzinfo=UTC),
             resource_type="CAMPAIGN_BUDGET",
             resource_changed_name=campaigns["Non-brand Search"].name,
@@ -178,14 +175,13 @@ def seed_demo(session: Session, as_of: date | None = None) -> dict:
             old_value={"amount_micros": 200_000_000},
             new_value={"amount_micros": 250_000_000},
             client_type="GOOGLE_ADS_WEB_CLIENT",
-            user_email=DEMO_EMAIL,
+            user_email=FIXTURE_EMAIL,
         )
     )
     account.last_successful_sync_at = datetime.now(UTC)
     session.flush()
     return {
-        "email": DEMO_EMAIL,
-        "password": DEMO_PASSWORD,
+        "email": FIXTURE_EMAIL,
         "user_id": user.id,
         "workspace_id": workspace.id,
         "account_id": account.id,

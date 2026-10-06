@@ -35,6 +35,42 @@ def _num(value) -> str:
     return f"{number:.2f}"
 
 
+def render_day_change(report: dict) -> str:
+    comparison = report.get("comparison") or {}
+    current = comparison.get("current") or report.get("account") or {}
+    baseline = comparison.get("baseline") or {}
+    changes = comparison.get("changes") or {}
+    period = comparison.get("period") or {}
+    yesterday = period.get("baseline_start")
+    today = period.get("current_end")
+    lines = [f"Change from {yesterday} to {today}", ""]
+    for metric, label in (
+        ("cost", "Spend"),
+        ("conversions", "Conversions"),
+        ("conversion_value", "Conversion value"),
+        ("cost_per_conversion", "CPA"),
+        ("roas", "ROAS"),
+        ("average_cpc", "CPC"),
+        ("conversion_rate", "Conversion rate"),
+    ):
+        change = changes.get(metric) or {}
+        lines.append(
+            f"- {label}: {yesterday} {_num(baseline.get(metric))}, {today} {_num(current.get(metric))}, "
+            f"change {_pct(change.get('percent'))}."
+        )
+    lines.append("")
+    lines.append("Campaigns that moved")
+    top_changes = report.get("top_changes") or []
+    if not top_changes:
+        lines.append("No campaign moved enough to list.")
+    for change in top_changes:
+        lines.append(
+            f"- {change['name']}: spend delta {_money(change['spend_delta'])}, "
+            f"conversion delta {_num(change['conversion_delta'])}."
+        )
+    return "\n".join(lines)
+
+
 def render_report(report: dict) -> str:
     account = report.get("account") or {}
     comparison = report.get("comparison") or {}

@@ -4,12 +4,13 @@ from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from gads.config import get_settings
+from fastapi.responses import Response
 from gads.db import get_db
 from gads.models import AccountAnalyticsSettings, AdAccount, Campaign, User
 from gads_analytics.analysis import budget_opportunities, wasted_spend_candidates
-from gads_analytics.ask import answer_question
+from gads_analytics.ask import answer_question, answer_strategy
 from gads_analytics.metrics import assert_equal_length
+from gads_analytics.narrative import render_report
 from gads_analytics.repository import (
     _by_campaign,
     _campaign_names,
@@ -30,7 +31,27 @@ from gads_analytics.repository import (
     resolve_as_of,
     search_term_report,
 )
-from gads_ingestion.seed import seed_demo
+from gads_analytics.saved_reports import (
+    add_saved_highlight,
+    day_change_zip,
+    delete_saved_highlight,
+    delete_saved_report,
+    list_saved_reports,
+    rename_saved_report,
+    save_report_summary,
+    save_trend_summary,
+    trend_notes_zip,
+)
+from gads_analytics.settings_presets import (
+    PresetNotFound,
+    apply_thresholds,
+    delete_settings_preset,
+    factory_values,
+    list_settings_presets,
+    load_settings_preset,
+    save_settings_preset,
+)
+from gads_analytics.trends import build_trends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,10 +67,27 @@ from gads_api.deps import (
 router = APIRouter(prefix="/api", tags=["analytics"])
 
 
+class SummaryTitleUpdate(BaseModel):
+    title: str = Field(default="", max_length=200)
+
+
+class HighlightCreate(BaseModel):
+    quote: str = Field(min_length=1, max_length=2000)
+    color: str
+    note: str = Field(default="", max_length=500)
+
+
 class QuestionRequest(BaseModel):
     account_id: str
     question: str = Field(min_length=3, max_length=2000)
     as_of: date | None = None
+
+
+class StrategyQuestion(BaseModel):
+    account_id: str
+    question: str = Field(min_length=3, max_length=2000)
+    start_date: date
+    end_date: date
 
 
 class SettingsUpdate(BaseModel):
@@ -64,6 +102,21 @@ class SettingsUpdate(BaseModel):
     budget_lost_is_min: float | None = None
     min_clicks: int | None = None
     min_spend_for_anomaly: float | None = None
+
+
+class PresetCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    min_spend_for_waste: float = Field(ge=0)
+    spend_anomaly_pct: float = Field(ge=0)
+    cpa_anomaly_pct: float = Field(ge=0)
+    roas_anomaly_pct: float = Field(ge=0)
+    conversion_anomaly_pct: float = Field(ge=0)
+    cpc_anomaly_pct: float = Field(ge=0)
+    cvr_anomaly_pct: float = Field(ge=0)
+    zero_conversion_min_spend: float = Field(ge=0)
+    budget_lost_is_min: float = Field(ge=0)
+    min_clicks: int = Field(ge=0)
+    min_spend_for_anomaly: float = Field(ge=0)
 
 
 def _settings_payload(row: AccountAnalyticsSettings) -> dict:
@@ -92,13 +145,145 @@ def _ensure_settings(session: Session, account_id: str) -> AccountAnalyticsSetti
     return row
 
 
+@router.get("/reports/saved")
+def saved_reports(account: AdAccount = Depends(account_access), session: Session = Depends(get_db)) -> dict:
+    return {
+        "as_of": resolve_as_of(session, account.id, None).isoformat(),
+        "reports": list_saved_reports(session, account.id),
+    }
+
+
+@router.post("/reports/saved/{report_id}/highlights")
+def create_highlight(
+    report_id: str,
+    body: HighlightCreate,
+    account: AdAccount = Depends(account_access),
+    session: Session = Depends(get_db),
+) -> dict:
+    try:
+        return add_saved_highlight(session, account.id, report_id, body.quote, body.color, body.note)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/reports/saved/{report_id}/highlights/{highlight_id}")
+def delete_highlight(
+    report_id: str,
+    highlight_id: str,
+    account: AdAccount = Depends(account_access),
+    session: Session = Depends(get_db),
+) -> dict:
+    if not delete_saved_highlight(session, account.id, report_id, highlight_id):
+        raise HTTPException(status_code=404, detail="Highlight was not found")
+    return {"deleted": True}
+
+
+@router.patch("/reports/saved/{report_id}")
+def rename_saved(
+    report_id: str,
+    body: SummaryTitleUpdate,
+    account: AdAccount = Depends(account_access),
+    session: Session = Depends(get_db),
+) -> dict:
+    try:
+        renamed = rename_saved_report(session, account.id, report_id, body.title)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if renamed is None:
+        raise HTTPException(status_code=404, detail="Saved summary was not found")
+    return renamed
+
+
+@router.delete("/reports/saved/{report_id}")
+def delete_saved(
+    report_id: str,
+    account: AdAccount = Depends(account_access),
+    session: Session = Depends(get_db),
+) -> dict:
+    if not delete_saved_report(session, account.id, report_id):
+        raise HTTPException(status_code=404, detail="Saved summary was not found")
+    return {"deleted": True}
+
+
+@router.get("/reports/saved/export")
+def export_saved_reports(
+    start: date,
+    end: date,
+    account: AdAccount = Depends(account_access),
+    session: Session = Depends(get_db),
+) -> Response:
+    if end < start:
+        raise HTTPException(status_code=400, detail="end date is before start date")
+    try:
+        payload, filename = day_change_zip(session, account, start, end)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/trends")
+def trends(
+    account: AdAccount = Depends(account_access),
+    session: Session = Depends(get_db),
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> dict:
+    start, end = resolve_dates(start_date, end_date)
+    return build_trends(session, account, start, end)
+
+
+@router.get("/trends/saved/export")
+def export_saved_trends(
+    start: date,
+    end: date,
+    account: AdAccount = Depends(account_access),
+    session: Session = Depends(get_db),
+) -> Response:
+    if end < start:
+        raise HTTPException(status_code=400, detail="end date is before start date")
+    try:
+        payload, filename = trend_notes_zip(session, account.id, start, end)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/ai/strategy")
+def ai_strategy(
+    body: StrategyQuestion,
+    user: User = Depends(current_user),
+    session: Session = Depends(get_db),
+) -> dict:
+    account = authorized_account(body.account_id, user, session)
+    start, end = resolve_dates(body.start_date, body.end_date)
+    payload = answer_strategy(session, account, body.question, start, end)
+    payload["saved_id"] = save_trend_summary(session, account.id, start, end, body.question, payload["answer"])
+    return payload
+
+
 @router.get("/reports/daily")
 def daily_report(
     account: AdAccount = Depends(account_access),
     session: Session = Depends(get_db),
     as_of: date | None = None,
+    kind: str = "yesterday_vs_prev7_avg",
 ) -> dict:
-    return build_report(session, account, "yesterday_vs_prev7_avg", as_of)
+    try:
+        report = build_report(session, account, kind, as_of)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    save_report_summary(session, account.id, report, render_report(report))
+    return report
 
 
 @router.get("/reports/weekly")
@@ -107,7 +292,9 @@ def weekly_report(
     session: Session = Depends(get_db),
     as_of: date | None = None,
 ) -> dict:
-    return build_report(session, account, "last_7_vs_prev_7", as_of)
+    report = build_report(session, account, "last_7_vs_prev_7", as_of)
+    save_report_summary(session, account.id, report, render_report(report))
+    return report
 
 
 @router.get("/compare")
@@ -347,7 +534,9 @@ def ai_query(
     session: Session = Depends(get_db),
 ) -> dict:
     account = authorized_account(body.account_id, user, session)
-    return answer_question(session, account, body.question, body.as_of)
+    payload = answer_question(session, account, body.question, body.as_of)
+    save_report_summary(session, account.id, payload["report"], payload["answer"], body.question)
+    return payload
 
 
 @router.get("/accounts/{account_id}/settings")
@@ -368,13 +557,58 @@ def update_settings(
     return _settings_payload(row)
 
 
-@router.post("/demo/seed")
-def demo_seed(session: Session = Depends(get_db)) -> dict:
-    if not get_settings().enable_demo_seed:
-        raise HTTPException(status_code=404, detail="Demo seed is disabled")
-    payload = seed_demo(session)
+@router.post("/accounts/{account_id}/settings/reset")
+def reset_settings(account: AdAccount = Depends(account_access), session: Session = Depends(get_db)) -> dict:
+    row = _ensure_settings(session, account.id)
+    apply_thresholds(row, factory_values())
     session.commit()
-    return payload
+    return _settings_payload(row)
+
+
+@router.get("/accounts/{account_id}/settings/presets")
+def get_settings_presets(account: AdAccount = Depends(account_access), session: Session = Depends(get_db)) -> dict:
+    return {"presets": list_settings_presets(session, account.id)}
+
+
+@router.post("/accounts/{account_id}/settings/presets")
+def create_settings_preset(
+    body: PresetCreate,
+    account: AdAccount = Depends(account_access),
+    session: Session = Depends(get_db),
+) -> dict:
+    try:
+        return save_settings_preset(session, account.id, body.name, body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/accounts/{account_id}/settings/presets/{preset_id}/apply")
+def apply_settings_preset(
+    preset_id: str,
+    account: AdAccount = Depends(account_access),
+    session: Session = Depends(get_db),
+) -> dict:
+    try:
+        preset = load_settings_preset(session, account.id, preset_id)
+    except PresetNotFound as exc:
+        raise HTTPException(status_code=404, detail="That preset was not found.") from exc
+    row = _ensure_settings(session, account.id)
+    apply_thresholds(row, preset["values"])
+    session.commit()
+    return _settings_payload(row)
+
+
+@router.delete("/accounts/{account_id}/settings/presets/{preset_id}")
+def remove_settings_preset(
+    preset_id: str,
+    account: AdAccount = Depends(account_access),
+    session: Session = Depends(get_db),
+) -> dict:
+    try:
+        delete_settings_preset(session, account.id, preset_id)
+    except PresetNotFound as exc:
+        raise HTTPException(status_code=404, detail="That preset was not found.") from exc
+    return {"deleted": True}
 
 
 @router.get("/sync-runs")

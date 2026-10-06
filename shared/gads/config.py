@@ -18,12 +18,12 @@ class Settings(BaseSettings):
     google_ads_client_secret: str = ""
     google_ads_login_customer_id: str = ""
     google_oauth_redirect_uri: str = "http://localhost:8000/api/google/oauth/callback"
-    google_ads_use_fake: bool = False
     google_ads_api_version: str = "v25"
 
     sync_initial_lookback_days: int = 90
+    sync_history_lookback_days: int = 395
     ingest_max_days: int = 400
-    tool_max_days: int = 90
+    tool_max_days: int = 400
     tool_max_rows: int = 100
 
     frontend_url: str = "http://localhost:3000"
@@ -31,11 +31,14 @@ class Settings(BaseSettings):
 
     openai_api_key: str = ""
     openai_model: str = "gpt-4.1-mini"
+    openrouter_api_key: str = ""
+    openrouter_backup_api_key: str = ""
+    council_models: str = "openai/gpt-5.1,google/gemini-3-pro-preview,anthropic/claude-sonnet-4.5,x-ai/grok-4"
+    chairman_model: str = "google/gemini-3-pro-preview"
     sentry_dsn: str = ""
 
     gads_api_base_url: str = "http://localhost:8000"
     gads_api_token: str = ""
-    enable_demo_seed: bool = False
 
     def cors_origin_list(self) -> list[str]:
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
